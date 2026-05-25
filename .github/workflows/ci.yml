@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run test
+      - run: bun run build
+
+# Notes:
+#   - `bun install --frozen-lockfile` is the CI-strict equivalent of `npm ci`:
+#     it refuses to update bun.lock and fails if package.json drifts from it.
+#   - We use `bun run test` (not bare `bun test`) on purpose: `bun test` is a
+#     builtin that ALWAYS invokes Bun's own native runner and ignores the
+#     `test` script in package.json. `bun run test` honors the script, which
+#     still points at `vitest run`. We keep Vitest because the suite uses
+#     vitest's globals — migrating to bun:test would touch every test file.

@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  margin: 0;
+}
+
+/*
+ * Cytoscape host container. Light + dark variants of the grid background so
+ * the canvas reads as a clean grid in both modes. The grid is drawn with
+ * two cross-hatched linear-gradients (cheap, GPU-friendly) tinted with low
+ * opacity so it sits behind content without competing for attention.
+ */
+.cy-container {
+  width: 100%;
+  height: 100%;
+  background-color: #f6f8fb;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.dark .cy-container {
+  background-color: #0b1020;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+}
+
+/*
+ * Edge hover tooltip. Inverted in dark mode (light pill over dark bg) so it
+ * still reads as a "tooltip" — a near-black pill on a dark canvas would
+ * disappear.
+ */
+.cy-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(19, 21, 42, 0.92);
+  color: #f6f7f9;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  z-index: 20;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.dark .cy-tooltip {
+  background: rgba(238, 240, 248, 0.95);
+  color: #111728;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}

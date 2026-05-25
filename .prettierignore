@@ -1,0 +1,5 @@
+dist
+dist-single
+node_modules
+package-lock.json
+tsconfig.tsbuildinfo

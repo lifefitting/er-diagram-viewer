@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#6366f1" />
+    <meta name="color-scheme" content="light dark" />
+
+    <!--
+      SEO core.
+      - title: prefer "{产品名} – {一句话定位}" so search snippets carry the
+        value prop, not just the brand.
+      - description: ≤ 155 chars so it doesn't get truncated in SERPs.
+      - keywords: legacy hint; some site-search tools still index it.
+      - robots: index,follow is the default but we set it explicitly so a
+        future reverse-proxy can't strip it.
+    -->
+    <title>智能 ER 图查看器 — 粘贴 SQL DDL，秒级生成数据库关系图</title>
+    <meta
+      name="description"
+      content="纯前端运行的智能 ER 图工具：粘贴 MySQL / PostgreSQL / SQLite DDL，自动解析表结构、智能推断隐式外键、按模块自动着色分组，5 秒生成可分享的数据库关系图。商业级数据库设计评审利器。"
+    />
+    <meta
+      name="keywords"
+      content="ER 图,数据库设计,SQL DDL 解析,外键推断,数据库 schema 可视化,ER diagram,database design,MySQL,PostgreSQL,Schema viewer"
+    />
+    <meta name="robots" content="index,follow" />
+    <meta name="author" content="ER Diagram Viewer" />
+    <!--
+      Intentional: no <link rel="canonical"> baked into source. Canonical
+      URLs require the absolute deployed origin, which we don't know at
+      build time. Inject one at deploy time via your hosting provider's
+      edge-side header rewrite, or via a deploy-time HTML transform.
+    -->
+
+    <!-- Open Graph (Facebook / LinkedIn / WeChat / Slack preview) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="智能 ER 图查看器" />
+    <meta property="og:title" content="智能 ER 图查看器 — 粘贴 SQL DDL，秒级生成数据库关系图" />
+    <meta
+      property="og:description"
+      content="纯前端运行：粘贴 DDL，自动推断外键、按模块着色分组，5 秒得到可分享的 ER 图。"
+    />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:locale:alternate" content="en_US" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="智能 ER 图查看器" />
+    <meta
+      name="twitter:description"
+      content="粘贴 SQL DDL，5 秒生成带智能外键推断的数据库关系图。"
+    />
+
+    <!--
+      Inline SVG favicon — the sparkles glyph that matches the toolbar
+      brand mark and the sidebar. Inlining as data: URL means zero extra
+      network requests during first paint.
+    -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%236366f1'/><stop offset='100%25' stop-color='%23d946ef'/></linearGradient></defs><rect width='32' height='32' rx='7' fill='url(%23g)'/><path fill='white' d='M16 6l1.9 6.2 6.2 1.9-6.2 1.9L16 22l-1.9-6L7.9 14.1l6.2-1.9L16 6z'/></svg>"
+    />
+
+    <!--
+      Structured data: SoftwareApplication. Helps search engines build a
+      rich card for the tool. Keep keys minimal — adding too much makes the
+      JSON-LD fragile to maintain.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "智能 ER 图查看器",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Web",
+        "description": "纯前端运行的智能 ER 图工具，粘贴 SQL DDL 自动生成数据库关系图，支持外键智能推断与模块自动着色分组。",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
+
+    <!--
+      Critical CSS for the skeleton screen. Inlined so the browser can
+      paint a meaningful first frame BEFORE the main JS bundle finishes
+      downloading + executing. Removed by main.tsx the moment React
+      mounts (see `#root:not(:empty) ~ .skeleton` rule).
+    -->
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        background: #f8fafc;
+        color: #0f172a;
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+          Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .app-skeleton {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        pointer-events: none;
+        z-index: 1;
+      }
+      .app-skeleton__bar {
+        height: 44px;
+        background: #ffffff;
+        border-bottom: 1px solid #e2e8f0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+      }
+      .app-skeleton__brand {
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        background: linear-gradient(135deg, #6366f1, #d946ef);
+      }
+      .app-skeleton__title {
+        height: 12px;
+        width: 120px;
+        border-radius: 4px;
+        background: linear-gradient(90deg, #e2e8f0, #f1f5f9, #e2e8f0);
+        background-size: 200% 100%;
+        animation: shimmer 1.4s ease-in-out infinite;
+      }
+      .app-skeleton__main {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+      }
+      .app-skeleton__panel {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        width: 320px;
+        height: 200px;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        box-shadow: 0 8px 28px -4px rgba(15, 23, 42, 0.12);
+      }
+      .app-skeleton__hint {
+        font-size: 12px;
+        color: #94a3b8;
+        letter-spacing: 0.02em;
+      }
+      .app-skeleton__spinner {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 2px solid #e2e8f0;
+        border-top-color: #6366f1;
+        animation: spin 0.9s linear infinite;
+        margin-right: 8px;
+        vertical-align: middle;
+        display: inline-block;
+      }
+      @keyframes shimmer {
+        0% {
+          background-position: 200% 0;
+        }
+        100% {
+          background-position: -200% 0;
+        }
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      /* Once React has mounted (so #root has children), the skeleton fades
+         out and gets pulled out of the layer tree by the actual app. */
+      #root:not(:empty) + .app-skeleton {
+        opacity: 0;
+        transition: opacity 0.2s ease-out;
+        visibility: hidden;
+      }
+      /* Dark-mode skeleton. Honors the OS preference at first paint only —
+         the React app may override later via the explicit theme picker, but
+         until it does we shouldn't flash white at OS-dark users.
+         Inline because the skeleton is also inline; loading Tailwind to
+         theme the skeleton would defeat the FCP optimization. */
+      @media (prefers-color-scheme: dark) {
+        html,
+        body,
+        #root {
+          background: #0b1020;
+          color: #d6dbeb;
+        }
+        .app-skeleton__bar {
+          background: #111728;
+          border-bottom-color: #262d44;
+        }
+        .app-skeleton__title {
+          background: linear-gradient(90deg, #1c2237, #262d44, #1c2237);
+          background-size: 200% 100%;
+        }
+        .app-skeleton__panel {
+          background: #111728;
+          border-color: #262d44;
+          box-shadow: 0 8px 28px -4px rgba(0, 0, 0, 0.6);
+        }
+        .app-skeleton__hint {
+          color: #5a648a;
+        }
+        .app-skeleton__spinner {
+          border-color: #262d44;
+          border-top-color: #6366f1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!--
+      Above-the-fold skeleton so the user sees the product chrome (toolbar
+      + floating panel placeholder) *immediately* after HTML lands, even
+      before the React bundle parses. This is the single biggest FCP /
+      LCP win for an SPA — Lighthouse credits any meaningful painted
+      pixels at the moment they appear, not at the moment the app is
+      interactive.
+    -->
+    <div class="app-skeleton" aria-hidden="true">
+      <div class="app-skeleton__bar">
+        <div class="app-skeleton__brand"></div>
+        <div class="app-skeleton__title"></div>
+      </div>
+      <div class="app-skeleton__main">
+        <div class="app-skeleton__panel"></div>
+        <div class="app-skeleton__hint">
+          <span class="app-skeleton__spinner"></span>
+          正在加载智能 ER 图查看器…
+        </div>
+      </div>
+    </div>
+
+    <!--
+      SEO-friendly noscript fallback. Search crawlers that don't execute
+      JS still see a meaningful sentence describing the tool. Hidden from
+      sighted users by `display:none` which Lighthouse's crawler ignores.
+    -->
+    <noscript>
+      <h1>智能 ER 图查看器</h1>
+      <p>
+        这是一个纯前端的智能 ER 图工具，支持粘贴 MySQL / PostgreSQL / SQLite 的
+        SQL DDL，自动解析表结构、智能推断隐式外键、按模块自动着色分组，5
+        秒内生成可分享的数据库关系图。请启用浏览器 JavaScript 以使用本工具。
+      </p>
+    </noscript>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
