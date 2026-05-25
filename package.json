@@ -23,7 +23,7 @@
     "frontend-only",
     "single-file-html"
   ],
-  "author": "huluwa",
+  "author": "lifefitting",
   "license": "MIT",
   "repo": "https://github.com/lifefitting/er-diagram-viewer",
   "packageManager": "bun@1.3.10",

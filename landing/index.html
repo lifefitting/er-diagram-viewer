@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#6366f1" />
+    <meta name="color-scheme" content="light dark" />
+
+    <title>ER Diagram Viewer — 粘贴 SQL DDL，秒级生成可交互的 ER 图</title>
+    <meta
+      name="description"
+      content="纯前端运行的智能 ER 图查看器。粘贴 SQL DDL 自动生成数据库关系图，支持外键智能推断、分片表合并、模块自动着色。零后端，离线可用，可双击 HTML 文件运行。"
+    />
+    <meta name="keywords" content="ER图,ER Diagram,SQL DDL,数据库关系图,外键推断,Schema 可视化,MySQL,PostgreSQL" />
+    <meta name="author" content="ER Diagram Viewer" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="ER Diagram Viewer — 粘贴 SQL DDL，秒级生成可交互的 ER 图" />
+    <meta
+      property="og:description"
+      content="纯前端、离线可用、单文件分发的智能 ER 图工具。即使 DDL 里没有 FOREIGN KEY 也能按命名 + 类型 + 索引启发式推断外键。"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!--
+      纯内联 CSS。无外部字体、无 CDN、无 JS。
+      调色板与主程序对齐：indigo #6366f1 主色，
+      浅色模式背景 #ffffff，深色模式背景 #0f172a / 元素 #1e293b。
+      所有断点都通过单一 max-width 容器 + flex/grid 自适应控制。
+    -->
+    <style>
+      :root {
+        --bg: #ffffff;
+        --bg-soft: #f8fafc;
+        --surface: #ffffff;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --text-muted: #475569;
+        --text-faint: #64748b;
+        --accent: #6366f1;
+        --accent-hover: #4f46e5;
+        --accent-soft: #eef2ff;
+        --amber: #f59e0b;
+        --amber-soft: #fef3c7;
+        --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+        --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+        --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
+        --radius: 12px;
+        --radius-sm: 8px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1220;
+          --bg-soft: #111827;
+          --surface: #131c2f;
+          --border: #1f2a44;
+          --text: #e2e8f0;
+          --text-muted: #94a3b8;
+          --text-faint: #64748b;
+          --accent: #818cf8;
+          --accent-hover: #a5b4fc;
+          --accent-soft: #1e1b4b;
+          --amber: #fbbf24;
+          --amber-soft: #422006;
+          --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+          --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+          --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+        }
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", Roboto, Helvetica, Arial,
+          sans-serif;
+        font-size: 16px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      .container {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      /* ===== Nav ===== */
+      .nav {
+        position: sticky;
+        top: 0;
+        background: color-mix(in srgb, var(--bg) 92%, transparent);
+        backdrop-filter: saturate(150%) blur(8px);
+        border-bottom: 1px solid var(--border);
+        z-index: 10;
+      }
+      .nav-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 56px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 15px;
+        color: var(--text);
+        text-decoration: none;
+      }
+      .brand-mark {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-weight: 700;
+        font-size: 13px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      .nav-links a {
+        color: var(--text-muted);
+        font-size: 14px;
+        text-decoration: none;
+        transition: color 0.15s;
+      }
+      .nav-links a:hover { color: var(--text); }
+
+      /* ===== Hero ===== */
+      .hero {
+        padding: 80px 0 60px;
+        text-align: center;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        margin-bottom: 20px;
+      }
+      .badge::before {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      h1 {
+        font-size: clamp(32px, 5vw, 48px);
+        line-height: 1.15;
+        font-weight: 800;
+        margin: 0 0 16px;
+        letter-spacing: -0.02em;
+      }
+      h1 .accent {
+        background: linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .lead {
+        font-size: clamp(15px, 1.6vw, 18px);
+        color: var(--text-muted);
+        max-width: 640px;
+        margin: 0 auto 32px;
+      }
+      .cta-group {
+        display: inline-flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 22px;
+        border-radius: var(--radius-sm);
+        font-size: 14px;
+        font-weight: 600;
+        text-decoration: none;
+        transition: transform 0.1s, box-shadow 0.15s, background 0.15s, color 0.15s;
+        border: 1px solid transparent;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn:active { transform: translateY(1px); }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        box-shadow: var(--shadow-md);
+      }
+      .btn-primary:hover { background: var(--accent-hover); }
+      .btn-secondary {
+        background: var(--surface);
+        color: var(--text);
+        border-color: var(--border);
+      }
+      .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+      /* ===== Visual mock (inline SVG-like with divs for crispness) ===== */
+      .mock-wrap {
+        margin: 60px auto 0;
+        max-width: 900px;
+        position: relative;
+      }
+      .mock {
+        background: var(--bg-soft);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 28px;
+        box-shadow: var(--shadow-lg);
+        position: relative;
+        overflow: hidden;
+      }
+      .mock-svg { width: 100%; height: auto; display: block; }
+
+      /* ===== Sections ===== */
+      section {
+        padding: 80px 0;
+      }
+      .section-head {
+        text-align: center;
+        margin-bottom: 48px;
+      }
+      .section-eyebrow {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 8px;
+      }
+      h2 {
+        font-size: clamp(24px, 3vw, 32px);
+        font-weight: 700;
+        margin: 0 0 12px;
+        letter-spacing: -0.01em;
+      }
+      .section-lead {
+        color: var(--text-muted);
+        max-width: 600px;
+        margin: 0 auto;
+        font-size: 15px;
+      }
+
+      /* ===== Features grid ===== */
+      .features {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 16px;
+      }
+      .feature {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 24px;
+        transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+      }
+      .feature:hover {
+        transform: translateY(-2px);
+        border-color: var(--accent);
+        box-shadow: var(--shadow-md);
+      }
+      .feature-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 14px;
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .feature h3 {
+        font-size: 16px;
+        font-weight: 700;
+        margin: 0 0 8px;
+        letter-spacing: -0.005em;
+      }
+      .feature p {
+        color: var(--text-muted);
+        font-size: 14px;
+        margin: 0;
+        line-height: 1.55;
+      }
+
+      /* ===== Quickstart ===== */
+      .quickstart {
+        background: var(--bg-soft);
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      .quick-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 32px;
+        align-items: center;
+      }
+      @media (min-width: 768px) {
+        .quick-grid { grid-template-columns: 1fr 1fr; }
+      }
+      .quick-text h2 { text-align: left; margin-bottom: 16px; }
+      .quick-text p { color: var(--text-muted); margin: 0 0 12px; }
+      .quick-text ul { margin: 0; padding-left: 22px; color: var(--text-muted); }
+      .quick-text li { margin-bottom: 6px; }
+      pre.code {
+        margin: 0;
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 22px 20px;
+        border-radius: var(--radius);
+        overflow-x: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13.5px;
+        line-height: 1.7;
+        box-shadow: var(--shadow-lg);
+      }
+      .code .c { color: #64748b; }
+      .code .k { color: #c084fc; }
+      .code .s { color: #fbbf24; }
+      .code .p { color: #f472b6; }
+
+      /* ===== Comparison ===== */
+      .comparison-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+      table.cmp {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+        min-width: 640px;
+      }
+      table.cmp th, table.cmp td {
+        padding: 12px 16px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      table.cmp th {
+        background: var(--bg-soft);
+        font-weight: 600;
+        color: var(--text);
+        font-size: 13px;
+      }
+      table.cmp td { color: var(--text-muted); }
+      table.cmp td:first-child { font-weight: 600; color: var(--text); }
+      table.cmp .ok { color: #16a34a; font-weight: 600; }
+      table.cmp .no { color: #94a3b8; }
+      table.cmp tr:last-child td { border-bottom: none; }
+      table.cmp .highlight { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+      /* ===== CTA section ===== */
+      .cta-band {
+        text-align: center;
+        padding: 80px 24px;
+        background: linear-gradient(135deg, var(--accent-soft), transparent 70%);
+        border-top: 1px solid var(--border);
+      }
+      .cta-band h2 { margin-bottom: 12px; }
+      .cta-band p { color: var(--text-muted); margin: 0 0 28px; }
+
+      /* ===== Footer ===== */
+      footer {
+        padding: 32px 0 40px;
+        border-top: 1px solid var(--border);
+        color: var(--text-faint);
+        font-size: 13px;
+      }
+      .foot-inner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      footer a {
+        color: var(--text-muted);
+        text-decoration: none;
+        margin-left: 16px;
+      }
+      footer a:hover { color: var(--text); }
+
+      /* ===== Inline mini ER card (for hero visual) ===== */
+      .er-card {
+        fill: var(--surface);
+        stroke: var(--border);
+        stroke-width: 1;
+      }
+      .er-header { fill: var(--accent); }
+      .er-header-2 { fill: #8b5cf6; }
+      .er-header-3 { fill: #ec4899; }
+      .er-row-sep { stroke: var(--border); stroke-width: 1; }
+      .er-text { font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; fill: var(--text); }
+      .er-text-light { font: 400 10px ui-monospace, SFMono-Regular, Menlo, monospace; fill: var(--text-muted); }
+      .er-title { font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #fff; }
+      .er-edge { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+      .er-edge-dashed { stroke: var(--amber); stroke-width: 1.6; fill: none; stroke-dasharray: 5 3; }
+      .er-arrow { fill: var(--accent); }
+      .er-arrow-d { fill: var(--amber); }
+      .er-pk { fill: var(--amber-soft); }
+      .er-pk-text { font: 700 9px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #b45309; }
+      .er-fk-text { font: 700 9px ui-monospace, SFMono-Regular, Menlo, monospace; fill: #0369a1; }
+    </style>
+  </head>
+
+  <body>
+    <!-- ============== NAV ============== -->
+    <nav class="nav">
+      <div class="container nav-inner">
+        <a class="brand" href="#top">
+          <span class="brand-mark">ER</span>
+          <span>ER Diagram Viewer</span>
+        </a>
+        <div class="nav-links">
+          <a href="#features">特性</a>
+          <a href="#quickstart">快速开始</a>
+          <a href="#compare">对比</a>
+          <a href="https://github.com/lifefitting/er-diagram-viewer" target="_blank" rel="noopener">GitHub</a>
+        </div>
+      </div>
+    </nav>
+
+    <main id="top">
+      <!-- ============== HERO ============== -->
+      <section class="hero">
+        <div class="container">
+          <span class="badge">v0.1.0 · 首发版本</span>
+          <h1>
+            把 SQL DDL 变成<br />
+            <span class="accent">可交互的 ER 图</span>
+          </h1>
+          <p class="lead">
+            粘贴 <code>CREATE TABLE</code> 脚本到浏览器，秒级生成数据库关系图。
+            即使脚本没有 <code>FOREIGN KEY</code>，也能按命名、类型、索引启发式推断外键，并允许人工确认。
+            零后端，完全本地，导入的 SQL 不出你的浏览器。
+          </p>
+          <div class="cta-group">
+            <!-- TODO: 部署 SPA 到 /app/ 后此链接可用；当前先指向 GitHub Release -->
+            <a class="btn btn-primary" href="./app/">
+              立即试用
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </a>
+            <!-- TODO: 替换为 Release Assets 中 er-diagram-viewer.html 的实际下载链接 -->
+            <a class="btn btn-secondary" href="https://github.com/lifefitting/er-diagram-viewer/releases/latest" target="_blank" rel="noopener">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+              下载单文件 HTML
+            </a>
+          </div>
+
+          <!-- ============== HERO VISUAL: 内联 SVG ER 图迷你版 ============== -->
+          <div class="mock-wrap">
+            <div class="mock">
+              <svg class="mock-svg" viewBox="0 0 800 360" xmlns="http://www.w3.org/2000/svg" aria-label="ER 图示意">
+                <!-- users 表 -->
+                <g transform="translate(40,40)">
+                  <rect class="er-card" width="200" height="160" rx="8" />
+                  <rect class="er-header" width="200" height="30" rx="8" />
+                  <rect class="er-header" y="22" width="200" height="8" />
+                  <text class="er-title" x="14" y="20">users</text>
+                  <line class="er-row-sep" x1="0" y1="30" x2="200" y2="30" />
+                  <!-- row 1: id (PK) -->
+                  <rect class="er-pk" x="0" y="30" width="200" height="32" />
+                  <rect class="er-pk" x="8" y="38" width="26" height="14" rx="3" />
+                  <text class="er-pk-text" x="13" y="49">PK</text>
+                  <text class="er-text" x="40" y="50">id</text>
+                  <text class="er-text-light" x="158" y="50">bigint</text>
+                  <line class="er-row-sep" x1="0" y1="62" x2="200" y2="62" />
+                  <!-- row 2: email -->
+                  <text class="er-text" x="14" y="82">email</text>
+                  <text class="er-text-light" x="138" y="82">varchar</text>
+                  <line class="er-row-sep" x1="0" y1="94" x2="200" y2="94" />
+                  <!-- row 3: name -->
+                  <text class="er-text" x="14" y="114">name</text>
+                  <text class="er-text-light" x="138" y="114">varchar</text>
+                  <line class="er-row-sep" x1="0" y1="126" x2="200" y2="126" />
+                  <!-- row 4: created_at -->
+                  <text class="er-text" x="14" y="146">created_at</text>
+                  <text class="er-text-light" x="148" y="146">datetime</text>
+                </g>
+
+                <!-- orders 表 -->
+                <g transform="translate(540,30)">
+                  <rect class="er-card" width="220" height="180" rx="8" />
+                  <rect class="er-header-2" width="220" height="30" rx="8" />
+                  <rect class="er-header-2" y="22" width="220" height="8" />
+                  <text class="er-title" x="14" y="20">orders</text>
+                  <line class="er-row-sep" x1="0" y1="30" x2="220" y2="30" />
+                  <!-- id PK -->
+                  <rect class="er-pk" x="0" y="30" width="220" height="32" />
+                  <rect class="er-pk" x="8" y="38" width="26" height="14" rx="3" />
+                  <text class="er-pk-text" x="13" y="49">PK</text>
+                  <text class="er-text" x="40" y="50">id</text>
+                  <text class="er-text-light" x="178" y="50">bigint</text>
+                  <line class="er-row-sep" x1="0" y1="62" x2="220" y2="62" />
+                  <!-- user_id FK -->
+                  <rect x="8" y="70" width="26" height="14" rx="3" fill="#dbeafe" />
+                  <text class="er-fk-text" x="13" y="81">FK</text>
+                  <text class="er-text" x="40" y="82">user_id</text>
+                  <text class="er-text-light" x="178" y="82">bigint</text>
+                  <line class="er-row-sep" x1="0" y1="94" x2="220" y2="94" />
+                  <!-- product_id FK -->
+                  <rect x="8" y="102" width="26" height="14" rx="3" fill="#dbeafe" />
+                  <text class="er-fk-text" x="13" y="113">FK</text>
+                  <text class="er-text" x="40" y="114">product_id</text>
+                  <text class="er-text-light" x="178" y="114">bigint</text>
+                  <line class="er-row-sep" x1="0" y1="126" x2="220" y2="126" />
+                  <!-- amount -->
+                  <text class="er-text" x="14" y="146">amount</text>
+                  <text class="er-text-light" x="170" y="146">decimal</text>
+                  <line class="er-row-sep" x1="0" y1="158" x2="220" y2="158" />
+                  <!-- created_at -->
+                  <text class="er-text" x="14" y="174">created_at</text>
+                  <text class="er-text-light" x="148" y="174">datetime</text>
+                </g>
+
+                <!-- products 表 -->
+                <g transform="translate(280,220)">
+                  <rect class="er-card" width="180" height="120" rx="8" />
+                  <rect class="er-header-3" width="180" height="30" rx="8" />
+                  <rect class="er-header-3" y="22" width="180" height="8" />
+                  <text class="er-title" x="14" y="20">products</text>
+                  <line class="er-row-sep" x1="0" y1="30" x2="180" y2="30" />
+                  <rect class="er-pk" x="0" y="30" width="180" height="32" />
+                  <rect class="er-pk" x="8" y="38" width="26" height="14" rx="3" />
+                  <text class="er-pk-text" x="13" y="49">PK</text>
+                  <text class="er-text" x="40" y="50">id</text>
+                  <text class="er-text-light" x="138" y="50">bigint</text>
+                  <line class="er-row-sep" x1="0" y1="62" x2="180" y2="62" />
+                  <text class="er-text" x="14" y="82">title</text>
+                  <text class="er-text-light" x="118" y="82">varchar</text>
+                  <line class="er-row-sep" x1="0" y1="94" x2="180" y2="94" />
+                  <text class="er-text" x="14" y="114">price</text>
+                  <text class="er-text-light" x="120" y="114">decimal</text>
+                </g>
+
+                <!-- 实线 FK: orders.user_id → users.id -->
+                <path class="er-edge" d="M 240 86 L 390 86 L 390 77 L 540 77" />
+                <polygon class="er-arrow" points="540,73 548,77 540,81" />
+
+                <!-- 虚线推断 FK: orders.product_id → products.id -->
+                <path class="er-edge-dashed" d="M 540 109 L 470 109 L 470 250 L 460 250" />
+                <polygon class="er-arrow-d" points="460,246 452,250 460,254" />
+
+                <!-- 标注 -->
+                <g transform="translate(390,40)">
+                  <rect width="62" height="20" rx="10" fill="var(--accent-soft)" />
+                  <text x="31" y="14" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10" font-weight="700" fill="var(--accent)">显式 FK</text>
+                </g>
+                <g transform="translate(478,165)">
+                  <rect width="74" height="20" rx="10" fill="var(--amber-soft)" />
+                  <text x="37" y="14" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10" font-weight="700" fill="#b45309">推断 FK · high</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============== FEATURES ============== -->
+      <section id="features">
+        <div class="container">
+          <div class="section-head">
+            <div class="section-eyebrow">核心特性</div>
+            <h2>专攻"读懂存量 Schema"这件事</h2>
+            <p class="section-lead">
+              不是又一个 ER 设计工具。它的位置是 review、onboarding、迁移前评估——把已经存在的库讲清楚。
+            </p>
+          </div>
+          <div class="features">
+            <div class="feature">
+              <div class="feature-icon">⤴</div>
+              <h3>外键智能推断</h3>
+              <p>命名后缀 + 类型一致 + 索引优先 + 复合前缀兜底，给出 high / medium / low 三档置信度，每条都附"推断理由"，支持逐条接受或拒绝。</p>
+            </div>
+            <div class="feature">
+              <div class="feature-icon">⊞</div>
+              <h3>分片表自动合并</h3>
+              <p>识别 <code>orders_0..orders_31</code> 这类按尾号水平分片的同构表，合并为单一逻辑表，避免推断阶段产生分片之间的噪声边。</p>
+            </div>
+            <div class="feature">
+              <div class="feature-icon">◉</div>
+              <h3>模块自动着色</h3>
+              <p>按 FK 邻接 + 表名前缀聚类业务模块，四套调色板（鲜艳 / 粉彩 / 大地 / 单色）可切换，跨模块的边自动加重提示。</p>
+            </div>
+            <div class="feature">
+              <div class="feature-icon">⊘</div>
+              <h3>纯前端 · 离线可用</h3>
+              <p>没有后端、没有上传、没有 telemetry。DDL 进了浏览器就在浏览器里，源码 100% 开源可审。</p>
+            </div>
+            <div class="feature">
+              <div class="feature-icon">▢</div>
+              <h3>单文件分发</h3>
+              <p>一个 <code>er-diagram-viewer.html</code>（~900 KB）打包所有依赖，双击就能跑、可邮件、可 U 盘、可塞 wiki 附件，离线环境照常工作。</p>
+            </div>
+            <div class="feature">
+              <div class="feature-icon">⤓</div>
+              <h3>DDL 导出</h3>
+              <p>把你已确认的推断 FK 一键导出为 <code>ALTER TABLE ADD CONSTRAINT</code> 脚本，回写到工程仓库里把缺失的 FK 补完整。还能导出 PNG / SVG 用于评审材料。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============== QUICKSTART ============== -->
+      <section id="quickstart" class="quickstart">
+        <div class="container quick-grid">
+          <div class="quick-text">
+            <div class="section-eyebrow">三种用法</div>
+            <h2>从粘贴到看图，最多 5 秒</h2>
+            <ul>
+              <li><strong>线上版</strong>：点击"立即试用"，把 DDL 贴进对话框</li>
+              <li><strong>单文件</strong>：下载 .html，离线/内网/U 盘都能跑</li>
+              <li><strong>自托管</strong>：clone 仓库本地启动，或部署到任何静态服务器</li>
+            </ul>
+            <p>样例 schema 在首屏自动加载，你能立即看到外键推断在做什么。</p>
+          </div>
+          <pre class="code"><span class="c"># 自托管：clone + 启动 dev server</span>
+git clone &lt;repo&gt;
+<span class="k">cd</span> er-diagram-viewer
+bun install
+bun run dev
+
+<span class="c"># 构建可静态托管的产物</span>
+bun run build      <span class="c"># → ./dist</span>
+bun run build:single <span class="c"># → ./dist-single/er-diagram-viewer.html</span></pre>
+        </div>
+      </section>
+
+      <!-- ============== COMPARISON ============== -->
+      <section id="compare">
+        <div class="container">
+          <div class="section-head">
+            <div class="section-eyebrow">差异化定位</div>
+            <h2>与同类工具的位置</h2>
+            <p class="section-lead">
+              它不与 dbdiagram.io / drawSQL 这类"协作型 ER 设计工具"竞争，专攻评审 / 读懂存量 schema 的场景。
+            </p>
+          </div>
+          <div class="comparison-wrap">
+            <table class="cmp">
+              <thead>
+                <tr>
+                  <th>维度</th>
+                  <th class="highlight">ER Diagram Viewer</th>
+                  <th>dbdiagram.io</th>
+                  <th>drawSQL</th>
+                  <th>DBeaver / Navicat</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>输入形式</td>
+                  <td class="highlight"><span class="ok">SQL DDL</span></td>
+                  <td>自有 DSL</td>
+                  <td>拖拽 GUI</td>
+                  <td>实库连接</td>
+                </tr>
+                <tr>
+                  <td>FK 自动推断</td>
+                  <td class="highlight"><span class="ok">✓ 核心能力</span></td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>分片表合并</td>
+                  <td class="highlight"><span class="ok">✓</span></td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>模块自动着色</td>
+                  <td class="highlight"><span class="ok">✓</span></td>
+                  <td class="no">—</td>
+                  <td class="no">手工</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>离线 / 隐私</td>
+                  <td class="highlight"><span class="ok">完全本地</span></td>
+                  <td class="no">SaaS</td>
+                  <td class="no">SaaS</td>
+                  <td>需连库</td>
+                </tr>
+                <tr>
+                  <td>价格</td>
+                  <td class="highlight"><span class="ok">免费 · MIT</span></td>
+                  <td>Freemium</td>
+                  <td>$19+/月</td>
+                  <td>商业版收费</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============== CTA BAND ============== -->
+      <section class="cta-band">
+        <div class="container">
+          <h2>把你的下一个数据库评审会，变成 5 秒</h2>
+          <p>粘贴 DDL → 浏览 ER 图 → 接受推断 → 导出补全脚本。</p>
+          <div class="cta-group">
+            <a class="btn btn-primary" href="./app/">立即试用</a>
+            <a class="btn btn-secondary" href="https://github.com/lifefitting/er-diagram-viewer" target="_blank" rel="noopener">查看源码</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ============== FOOTER ============== -->
+    <footer>
+      <div class="container foot-inner">
+        <div>© 2026 lifefitting · MIT License</div>
+        <div>
+<a href="https://github.com/lifefitting/er-diagram-viewer" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/lifefitting/er-diagram-viewer/releases/latest" target="_blank" rel="noopener">Releases</a>
+          <a href="https://github.com/lifefitting/er-diagram-viewer/issues" target="_blank" rel="noopener">Issues</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
