@@ -12,6 +12,8 @@
 📖 **[Landing page](https://lifefitting.github.io/er-diagram-viewer/)** &nbsp;·&nbsp;
 🐛 **[Issues](https://github.com/lifefitting/er-diagram-viewer/issues)**
 
+![Screenshot](docs/assets/screenshot.png)
+
 ---
 
 ## 一句话定位

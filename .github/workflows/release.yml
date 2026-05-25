@@ -1,0 +1,68 @@
+name: release
+
+# 当推送形如 `v0.1.0` / `v1.2.3` 的 tag 时触发：
+#   1. 跑 `bun run build:single` 产出 `dist-single/er-diagram-viewer.html`
+#   2. 用 softprops/action-gh-release 自动创建 GitHub Release
+#      - tag 名作为 release 名
+#      - generate_release_notes: 自动从 commit / PR 历史生成 changelog
+#      - 把单文件 HTML 作为 Asset 上传
+#
+# 这样以后发版只需要：
+#   git tag v0.1.1 && git push --tags
+# 不必再手动去 GitHub UI 拖文件。
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write  # 创建 release + 上传 asset 都需要
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 拿全量历史，generate_release_notes 才能正确算出"自上一个 tag 以来的变化"。
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      # 跑一遍校验，避免发出来的 release 内含未通过 CI 的代码。
+      - name: Typecheck + Test
+        run: |
+          bun run typecheck
+          bun run test
+
+      - name: Build single-file artifact
+        run: bun run build:single
+
+      - name: Create GitHub Release with asset
+        uses: softprops/action-gh-release@v2
+        with:
+          # tag 名（v0.1.0）会自动作为 release 标题。
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            dist-single/er-diagram-viewer.html
+          body: |
+            ## ER Diagram Viewer ${{ github.ref_name }}
+
+            🌐 **[Live Demo](https://lifefitting.github.io/er-diagram-viewer/app/)** · 📖 **[Landing](https://lifefitting.github.io/er-diagram-viewer/)**
+
+            ### 下载方式
+
+            - **🖱️ 双击即用**：下载下方 `er-diagram-viewer.html`，浏览器打开即可使用，无需安装任何依赖
+            - **🌐 在线版**：直接访问 [Live Demo](https://lifefitting.github.io/er-diagram-viewer/app/)
+
+            ---
+
+            下面是本版本相对上一个 tag 的提交清单（自动生成）：
