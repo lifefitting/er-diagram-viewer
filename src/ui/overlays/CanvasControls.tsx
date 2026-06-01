@@ -4,6 +4,7 @@ import type { Core } from 'cytoscape';
 import { getCy, getView, relayoutCurrent } from '../../diagram/cyHandle';
 import { useApp } from '../../store';
 import { MinusIcon, PlusIcon, HelpIcon, HandIcon, UndoIcon, RedoIcon } from './icons';
+import { PILL } from './pill';
 
 /**
  * Floating canvas controls, bottom-right over the diagram, as three independent
@@ -36,10 +37,6 @@ function zoomStep(dir: 1 | -1): void {
   cy.zoom({ level: next, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
 }
 
-const PILL =
-  'flex items-center rounded-full px-1 ' +
-  'border border-ink-200 dark:border-inkd-300 ' +
-  'bg-white/90 dark:bg-inkd-100/90 backdrop-blur shadow-lg';
 
 export function CanvasControls() {
   const canvasMode = useApp((s) => s.canvasMode);

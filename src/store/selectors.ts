@@ -1,12 +1,8 @@
 import type { ForeignKey, Schema } from '../parser/types';
 import { fkKey, type InferredFK } from '../infer/inferForeignKeys';
-
-/** cy node id for a table name. Inlined (mirrors `buildGraph.nodeId`) so the
- *  store has no import edge into the diagram layer. `deletedTables` is keyed by
- *  this. */
-function hiddenKey(name: string): string {
-  return 't:' + name.toLowerCase();
-}
+// `nodeId` lives in its own dependency-free module, so importing it here does
+// NOT pull the cytoscape-heavy diagram layer into the store/main bundle.
+import { nodeId as hiddenKey } from '../diagram/nodeId';
 
 /**
  * The schema with recycle-bin'd tables (and any explicit FK touching one)

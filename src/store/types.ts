@@ -47,17 +47,25 @@ export interface DisplayState {
    *  before the user has stepped into the results (Enter / the nav buttons).
    *  Transient. */
   searchActiveIndex: number;
+  /** A deferred Enter-step direction: set when the user presses Enter while the
+   *  query is still being flushed (the match list hasn't recomputed yet), and
+   *  consumed by `setSearchMatches` once the fresh list lands. Transient. */
+  pendingSearchStep: 1 | -1 | null;
   /** User-chosen theme preference. Resolution to a concrete light/dark mode
    *  happens in the App-level effect that toggles the `.dark` class. */
   theme: ThemePreference;
   setSearch: (s: string) => void;
   toggleDisplay: (k: keyof DisplayOptions) => void;
   setTheme: (t: ThemePreference) => void;
-  /** Replace the ordered match list (canvas → store); resets the active cursor
-   *  when the set of matches actually changed. */
+  /** Replace the ordered match list (canvas → store). Preserves the active
+   *  cursor across a pure reorder, resets it when the match SET changed, and
+   *  applies any `pendingSearchStep` (deferred Enter). */
   setSearchMatches: (ids: string[]) => void;
   /** Step the active match forward (+1) / backward (-1) with wraparound. */
   cycleSearchMatch: (dir: 1 | -1) => void;
+  /** Defer an Enter-step until the next `setSearchMatches` (the query is being
+   *  flushed and the match list hasn't recomputed yet). */
+  requestSearchStep: (dir: 1 | -1) => void;
 }
 
 /** Canvas pointer mode: `select` = left-drag marquees; `pan` = left-drag pans

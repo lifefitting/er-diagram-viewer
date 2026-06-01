@@ -1,5 +1,24 @@
 import type { StateCreator } from 'zustand';
 import type { AppState, CanvasState } from './types';
+import { visibleSchema } from './selectors';
+
+type RoutePoint = { x: number; y: number };
+
+/** Rebuild `manualRoutes` keeping only the keys `keep` accepts. Returns an
+ *  empty patch (identity-stable no-op) when nothing was dropped, so subscribers
+ *  don't re-render needlessly. Shared by every "remove some routes" reducer. */
+function filterRoutes(
+  routes: Record<string, RoutePoint[]>,
+  keep: (key: string) => boolean,
+): Partial<CanvasState> {
+  const next: Record<string, RoutePoint[]> = {};
+  let changed = false;
+  for (const [k, v] of Object.entries(routes)) {
+    if (keep(k)) next[k] = v;
+    else changed = true;
+  }
+  return changed ? { manualRoutes: next } : {};
+}
 
 /**
  * Canvas-level UI state: which cards are collapsed, manual width overrides,
@@ -31,9 +50,13 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasState> = (s
   },
   collapseAll() {
     set((s) => {
-      if (!s.schema) return {};
+      // Only collapse tables actually on the canvas — recycle-binned tables
+      // must not gain a collapse entry (they'd come back collapsed on restore,
+      // and the entry would linger in sessionStorage keyed to a hidden name).
+      const vis = visibleSchema(s.schema, s.deletedTables);
+      if (!vis) return {};
       const next: Record<string, boolean> = {};
-      for (const t of s.schema.tables) next[t.name] = true;
+      for (const t of vis.tables) next[t.name] = true;
       return { collapsed: next };
     });
   },
@@ -58,9 +81,12 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasState> = (s
     set({ viewport: v });
   },
   setManualRoute(fkKey, points) {
-    // Sanitize: reject non-finite coords and round to 1dp so the persisted JSON
-    // matches the `routePoints` toFixed(1) encoding (and never emits null).
-    if (!points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) return;
+    // Sanitize: a route needs at least its two endpoints, and reject non-finite
+    // coords — so we never persist a dead `[]` entry (which would survive in
+    // sessionStorage as invisible cruft) or a NaN override. Round to 1dp so the
+    // persisted JSON matches the `routePoints` toFixed(1) encoding.
+    if (points.length < 2 || !points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)))
+      return;
     const clean = points.map((p) => ({
       x: Math.round(p.x * 10) / 10,
       y: Math.round(p.y * 10) / 10,
@@ -68,37 +94,21 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasState> = (s
     set((s) => ({ manualRoutes: { ...s.manualRoutes, [fkKey]: clean } }));
   },
   clearManualRoute(fkKey) {
-    set((s) => {
-      if (!(fkKey in s.manualRoutes)) return {};
-      const next = { ...s.manualRoutes };
-      delete next[fkKey];
-      return { manualRoutes: next };
-    });
+    set((s) => filterRoutes(s.manualRoutes, (k) => k !== fkKey));
   },
   clearManualRoutesForNode(fkKeys) {
-    set((s) => {
-      const drop = fkKeys.filter((k) => k in s.manualRoutes);
-      if (drop.length === 0) return {};
-      const next = { ...s.manualRoutes };
-      for (const k of drop) delete next[k];
-      return { manualRoutes: next };
-    });
+    const drop = new Set(fkKeys);
+    set((s) => filterRoutes(s.manualRoutes, (k) => !drop.has(k)));
   },
   clearAllManualRoutes() {
-    set((s) => (Object.keys(s.manualRoutes).length === 0 ? {} : { manualRoutes: {} }));
+    set((s) => filterRoutes(s.manualRoutes, () => false));
   },
   replaceManualRoutes(routes) {
     set({ manualRoutes: routes });
   },
   pruneManualRoutes(liveKeys) {
-    set((s) => {
-      const live = new Set(liveKeys);
-      const keys = Object.keys(s.manualRoutes);
-      if (keys.every((k) => live.has(k))) return {};
-      const next: Record<string, { x: number; y: number }[]> = {};
-      for (const k of keys) if (live.has(k)) next[k] = s.manualRoutes[k];
-      return { manualRoutes: next };
-    });
+    const live = new Set(liveKeys);
+    set((s) => filterRoutes(s.manualRoutes, (k) => live.has(k)));
   },
   deleteTables(ids) {
     set((s) => {

@@ -14,6 +14,7 @@ import {
   ROW_BORDER,
   SUBTITLE_BORDER,
 } from '../diagram/buildGraph';
+import { parseEndpoint, routeToPoints } from '../diagram/routing/channelRoute';
 
 /**
  * Standalone SVG renderer for the ER diagram. Independent of cytoscape's
@@ -216,14 +217,11 @@ export function buildDiagramSvg(cy: Core, opts: SvgRenderOpts): string {
     if (e.ty < minY) minY = e.ty;
     if (e.sy > maxY) maxY = e.sy;
     if (e.ty > maxY) maxY = e.ty;
-    for (const tok of e.routePoints.split(' ')) {
-      if (!tok) continue;
-      const [px, py] = tok.split(',').map(Number);
-      if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
-      if (px < minX) minX = px;
-      if (px > maxX) maxX = px;
-      if (py < minY) minY = py;
-      if (py > maxY) maxY = py;
+    for (const p of routeToPoints(e.routePoints)) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
     }
   }
   if (!isFinite(minX)) {
@@ -464,15 +462,6 @@ function badgeSvg(
     `<text x="${fmt(x + 8)}" y="${fmt(y + 9.5)}" font-size="8.5" font-weight="700" ` +
     `text-anchor="middle" fill="${c.fg}">${kind}</text>`
   );
-}
-
-function parseEndpoint(s: unknown): { x: number; y: number } | null {
-  if (typeof s !== 'string') return null;
-  // Expected format like "265.0px -27.5px" — also handle the canvas placeholder
-  // value "outside-to-node" by returning null (caller falls back gracefully).
-  const m = /^(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px$/.exec(s.trim());
-  if (!m) return null;
-  return { x: parseFloat(m[1]), y: parseFloat(m[2]) };
 }
 
 /**

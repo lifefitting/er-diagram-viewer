@@ -3,6 +3,9 @@ import type { Column, ForeignKey, Schema, Table } from '../parser/types';
 import { colorForTableModule, type ModulesResult } from '../infer/inferModules';
 import { fkKey } from '../infer/inferForeignKeys';
 import { darkEdgeColor } from './edgeColor';
+import { nodeId } from './nodeId';
+
+export { nodeId };
 
 export interface BuiltElements {
   elements: ElementDefinition[];
@@ -13,6 +16,13 @@ export interface BuildDisplayOpts {
   showComment: boolean;
   /** Show the inline type column. (Hidden mode produces a much narrower card.) */
   showType: boolean;
+  /**
+   * Render only primary-key columns. Box sizing and per-row offsets must honor
+   * this so the card height and FK port Y positions match what the overlay /
+   * SVG export actually draw (which filter to PK columns the same way). Absent =
+   * show every column.
+   */
+  onlyPk?: boolean;
 }
 
 export interface BuildOptions {
@@ -132,6 +142,17 @@ export function shortType(raw: string): string {
   return name + args;
 }
 
+/**
+ * Whether a column is actually rendered on the card for the given display
+ * options. In `onlyPk` mode the overlay (TableOverlay) and SVG export filter to
+ * primary-key columns; box sizing and row offsets must use this same predicate
+ * so heights and FK port positions stay aligned with what's drawn.
+ */
+function isVisibleColumn(col: Column, table: Table, display: BuildDisplayOpts): boolean {
+  if (!display.onlyPk) return true;
+  return col.isPrimaryKey || table.primaryKey.includes(col.name);
+}
+
 export function tableBoxSize(
   table: Table,
   collapsed: boolean,
@@ -157,6 +178,7 @@ export function tableBoxSize(
   let rowsWidth = 0;
   let commentMaxW = 0;
   for (const col of table.columns) {
+    if (!isVisibleColumn(col, table, display)) continue;
     const nameW = measureText(col.name, 12);
     const typeW = display.showType ? measureText(shortType(col.rawType), 10.5) : 0;
     const rowW = BADGE_COL_WIDTH + nameW + (typeW ? TYPE_GAP + typeW : 0) + ROW_HPADDING;
@@ -188,6 +210,7 @@ export function tableBoxSize(
   const subtitleBlock = hasSubtitle ? SUBTITLE_HEIGHT + SUBTITLE_BORDER : 0;
   let rowsHeight = 0;
   for (const col of table.columns) {
+    if (!isVisibleColumn(col, table, display)) continue;
     rowsHeight += ROW_BORDER + FIELD_ROW_HEIGHT;
     if (display.showComment && col.comment) rowsHeight += COMMENT_LINE_HEIGHT;
   }
@@ -205,8 +228,16 @@ export function tableBoxSize(
 export function columnRowOffsets(table: Table, display: BuildDisplayOpts): number[] {
   const hasSubtitle = !!(table.comment && table.comment.trim());
   let cursor = HEADER_HEIGHT + (hasSubtitle ? SUBTITLE_HEIGHT + SUBTITLE_BORDER : 0);
+  // One entry per column so callers can keep indexing by the *full* column
+  // index (the value stored on each edge). Columns hidden in `onlyPk` mode get
+  // `NaN` — they occupy no vertical space and have no port row, so the router
+  // docks an edge on such a column to the card center instead of a phantom row.
   const offsets: number[] = [];
   for (const col of table.columns) {
+    if (!isVisibleColumn(col, table, display)) {
+      offsets.push(NaN);
+      continue;
+    }
     // Skip past this column's top border before measuring its content row.
     cursor += ROW_BORDER;
     // Center of the name+type row.
@@ -233,6 +264,17 @@ export function buildFkSourceColumns(fks: ForeignKey[]): Map<string, Set<string>
     for (const c of fk.fromColumns) set.add(c);
   }
   return map;
+}
+
+/**
+ * Stable, order-independent disambiguator for FKs that share a `canonicalFkKey`
+ * (e.g. case-only shard variants, or a duplicate column-pair). Case-sensitive +
+ * source so colliding edges get distinct, reproducible route keys across
+ * rebuilds. Truly identical FKs map to the same key — harmless, they're
+ * indistinguishable anyway.
+ */
+function fkRouteDisambig(fk: ForeignKey): string {
+  return `${fk.source}|${fk.fromTable}.${fk.fromColumns.join(',')}->${fk.toTable}.${fk.toColumns.join(',')}`;
 }
 
 export function buildElements(
@@ -272,9 +314,25 @@ export function buildElements(
   const tableByName = new Map(schema.tables.map((t) => [t.name, t] as const));
 
   // Stable per-edge key for manual-route overrides. canonicalFkKey is stable
-  // across rebuilds (unlike the index-prefixed `id`); on the rare collision
-  // (duplicate column-pair) we disambiguate with the build index.
-  const seenFkKeys = new Set<string>();
+  // across rebuilds (unlike the index-prefixed `id`). When two FKs share a
+  // canonical key — only reachable via case-only shard variants, since explicit
+  // FKs are parser-deduped and inferred FKs are one-per-(table,col) and
+  // suppressed when they shadow an explicit one — we disambiguate with a
+  // content-derived signature, NOT the build index. The index shifts whenever
+  // the effective-FK ordering changes (accept/reject, showLowConfidence) and
+  // would silently strand a hand-edited route. A unique key keeps the bare
+  // canonicalFkKey so routes persisted before this change still match.
+  //
+  // Invariant relied on here: a baseKey's collision COUNT is a function of
+  // rawSql alone — visibility toggles never change it, and `setSql` (the only
+  // mutation that can) clears manualRoutes. So a key never flips between bare
+  // and suffixed while a route is persisted. Preserve that if you add a new FK
+  // source, or routes keyed by the bare baseKey could be orphaned on rebuild.
+  const fkKeyCounts = new Map<string, number>();
+  for (const fk of fks) {
+    const k = fkKey(fk);
+    fkKeyCounts.set(k, (fkKeyCounts.get(k) ?? 0) + 1);
+  }
 
   for (const [i, fk] of fks.entries()) {
     const fromMod = modules.byTable.get(fk.fromTable);
@@ -297,8 +355,8 @@ export function buildElements(
     const baseKey = fkKey(fk);
     const accepted = fk.source === 'explicit' || decisions[baseKey] === 'accept';
     const lineStyle: 'solid' | 'dashed' = accepted ? 'solid' : 'dashed';
-    const edgeFkKey = seenFkKeys.has(baseKey) ? `${baseKey}#${i}` : baseKey;
-    seenFkKeys.add(baseKey);
+    const edgeFkKey =
+      (fkKeyCounts.get(baseKey) ?? 0) > 1 ? `${baseKey}#${fkRouteDisambig(fk)}` : baseKey;
 
     elements.push({
       group: 'edges',
@@ -339,10 +397,6 @@ export function buildElements(
   }
 
   return { elements };
-}
-
-export function nodeId(tableName: string): string {
-  return 't:' + tableName.toLowerCase();
 }
 
 /** Convenience for FK lookups: a "table.column" key. */

@@ -51,6 +51,7 @@ const DERIVED_OR_TRANSIENT_FIELDS = [
   // stale counter.
   'searchMatchIds',
   'searchActiveIndex',
+  'pendingSearchStep',
   // canUndo/canRedo mirror the in-module snapshot stacks (cyHandle), which are
   // session-only and empty after reload — persisting them would rehydrate the
   // buttons as stale-enabled. canvasMode resets to 'select' on a fresh tab.

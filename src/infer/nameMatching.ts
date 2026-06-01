@@ -53,6 +53,10 @@ export interface FkSuffixMatch {
  * before the capital so all-caps names and acronyms aren't mis-split.
  */
 export function stripFkSuffix(colName: string): FkSuffixMatch | null {
+  // Bare `id` / `ref` point at nothing — guard explicitly (the length checks
+  // below also exclude them, but this states the intent the docstring promises).
+  const lower = colName.toLowerCase();
+  if (lower === 'id' || lower === 'ref') return null;
   if (colName.endsWith('_id') && colName.length > 3) return { base: colName.slice(0, -3), via: 'id' };
   if (colName.endsWith('_ref') && colName.length > 4)
     return { base: colName.slice(0, -4), via: 'ref' };

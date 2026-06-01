@@ -54,8 +54,10 @@ export function inferForeignKeys(schema: Schema): InferredFK[] {
       }
 
       // Note the matched suffix family so the inference panel explains why a
-      // `_ref`-named column was treated as a foreign key.
-      if (stripped.via === 'ref') result.reason += ' (column uses _ref suffix)';
+      // `_ref`-named column was treated as a foreign key. Appended as a clause
+      // (not a nested parenthetical) so it reads cleanly after reasons that
+      // already end in "(…)", e.g. the same-namespace prefix match.
+      if (stripped.via === 'ref') result.reason += ' — matched via _ref suffix';
 
       inferred.push(buildFk(table, col, result));
     }

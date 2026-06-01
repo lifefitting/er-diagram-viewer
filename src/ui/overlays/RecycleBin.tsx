@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useApp } from '../../store';
+import { nodeId } from '../../diagram/nodeId';
 import { TrashIcon, RestoreIcon } from './icons';
-
-const PILL =
-  'flex items-center rounded-full px-1 border border-ink-200 dark:border-inkd-300 ' +
-  'bg-white/90 dark:bg-inkd-100/90 backdrop-blur shadow-lg';
+import { PILL } from './pill';
 
 /**
  * Recycle bin, bottom-left. Lists tables hidden from the diagram (via the
@@ -43,7 +41,7 @@ export function RecycleBin() {
   if (count === 0) return null;
 
   const nameOf = (id: string) =>
-    schema?.tables.find((t) => 't:' + t.name.toLowerCase() === id)?.name ?? id.slice(2);
+    schema?.tables.find((t) => nodeId(t.name) === id)?.name ?? id.slice(2);
 
   return (
     <div className="absolute bottom-4 left-4 z-20 flex flex-col items-start gap-2" ref={rootRef}>
