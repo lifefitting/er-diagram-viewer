@@ -1,12 +1,14 @@
 import type { Table } from '../../parser/types';
 import type { ModuleColor } from '../../infer/inferModules';
 import { HEADER_HEIGHT } from '../buildGraph';
+import { highlightMatch } from './highlight';
 
 interface TableHeaderProps {
   table: Table;
   moduleKey: string;
   moduleColor: ModuleColor;
   collapsed: boolean;
+  query?: string;
   onDragHandle: (e: React.MouseEvent) => void;
   onToggleCollapse: () => void;
 }
@@ -16,6 +18,7 @@ export function TableHeader({
   moduleKey,
   moduleColor,
   collapsed,
+  query = '',
   onDragHandle,
   onToggleCollapse,
 }: TableHeaderProps) {
@@ -45,7 +48,7 @@ export function TableHeader({
         {collapsed ? '▸' : '▾'}
       </button>
       <span className="truncate flex-1 min-w-0" title={table.name}>
-        {table.name}
+        {highlightMatch(table.name, query)}
       </span>
       {shardInfo && (
         <span

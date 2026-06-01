@@ -36,7 +36,7 @@ function isEscapedClose(text: string, i: number, quote: string): boolean {
  * `text.length` if the literal is unterminated). The caller is expected to
  * include character at `i` in its accumulator before calling.
  */
-function scanStringLiteral(text: string, i: number, quote: '\'' | '"'): number {
+function scanStringLiteral(text: string, i: number, quote: "'" | '"'): number {
   let j = i + 1;
   while (j < text.length) {
     if (text[j] === quote) {

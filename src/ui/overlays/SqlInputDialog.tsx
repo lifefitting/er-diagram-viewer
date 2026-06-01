@@ -393,13 +393,7 @@ function SecondaryButton({
   );
 }
 
-function Kbd({
-  children,
-  inverted,
-}: {
-  children: React.ReactNode;
-  inverted?: boolean;
-}) {
+function Kbd({ children, inverted }: { children: React.ReactNode; inverted?: boolean }) {
   return (
     <kbd
       className={clsx(

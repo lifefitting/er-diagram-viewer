@@ -71,6 +71,7 @@ CREATE TABLE payments (
 CREATE TABLE payment_refunds (
   id BIGINT NOT NULL AUTO_INCREMENT,
   payment_id BIGINT NOT NULL,
+  order_ref BIGINT COMMENT 'Originating order — named with the _ref suffix instead of _id',
   amount_cents INT NOT NULL,
   reason VARCHAR(200),
   refunded_at DATETIME,

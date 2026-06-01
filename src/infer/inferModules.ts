@@ -115,8 +115,21 @@ const COMMON_PREFIXES = ['t_', 'tbl_', 'tb_'];
 
 /** Words that are rarely the actual "domain" of a table; skip them when picking module seed. */
 const NOISE_TOKENS = new Set([
-  'tmp', 'temp', 'bak', 'backup', 'old', 'new', 'log', 'logs',
-  'rel', 'ref', 'map', 'mapping', 'rec', 'record', 'records',
+  'tmp',
+  'temp',
+  'bak',
+  'backup',
+  'old',
+  'new',
+  'log',
+  'logs',
+  'rel',
+  'ref',
+  'map',
+  'mapping',
+  'rec',
+  'record',
+  'records',
 ]);
 
 function stripPrefix(name: string): string {

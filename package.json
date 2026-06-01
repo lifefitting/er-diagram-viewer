@@ -1,7 +1,7 @@
 {
   "name": "er-diagram-viewer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "纯前端运行的智能 ER 图查看器：粘贴 SQL DDL 自动生成数据库关系图，支持外键智能推断、分片表合并与模块自动着色。Pure-frontend SQL DDL → interactive ER diagram with heuristic FK inference.",
   "keywords": [
@@ -44,9 +44,8 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\""
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
     "cytoscape": "^3.30.2",
-    "cytoscape-dagre": "^3.0.0",
-    "cytoscape-fcose": "^2.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.5"

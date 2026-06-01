@@ -2,19 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useApp } from '../../store';
 import { ExportMenu } from './ExportMenu';
-import type { Core } from 'cytoscape';
-import { getCy, relayoutCurrent } from '../../diagram/cyHandle';
 import { MODULE_PALETTES, type PaletteName, type ModuleColor } from '../../infer/inferModules';
 import type { ThemePreference } from '../../store/types';
 import {
   BrandMark,
   ClearIcon,
-  FitIcon,
-  ForceIcon,
-  LayersIcon,
   MonitorIcon,
   MoonIcon,
-  RelayoutIcon,
   SearchIcon,
   SunIcon,
   UploadIcon,
@@ -38,8 +32,6 @@ const THEME_OPTIONS: Array<{ id: ThemePreference; label: string; icon: () => JSX
 ];
 
 export function Toolbar({ onOpenImport }: Props) {
-  const layout = useApp((s) => s.layout);
-  const setLayout = useApp((s) => s.setLayout);
   const search = useApp((s) => s.search);
   const setSearch = useApp((s) => s.setSearch);
   const palette = useApp((s) => s.palette);
@@ -58,15 +50,13 @@ export function Toolbar({ onOpenImport }: Props) {
       )}
     >
       {/*
-        Three-cluster layout:
-          LEFT   — identity + query  : [Brand+stats] [Search]
-          CENTER — canvas controls   : [Layout] [Relayout] [Fit]
-          RIGHT  — appearance + I/O  : [Palette] [Theme] | [Import] [Export]
+        Two-cluster layout:
+          LEFT  — identity + query     : [Brand+stats] [Search]
+          RIGHT — appearance + I/O     : [Palette] [Theme] | [Import] [Export]
 
-        Two `flex-1` spacers between the clusters push the center to the
-        midpoint and the right cluster to the right edge. The center stays
-        truly centered (not just "after the left cluster") as the viewport
-        widens or the brand stats row toggles between 1 and 2 lines.
+        Canvas view controls (relayout / fit / zoom / fullscreen) now live in
+        the floating `CanvasControls` cluster bottom-right over the canvas, so
+        they sit next to where the user is actually looking.
       */}
 
       {/* LEFT: Brand + stats, then search inline */}
@@ -87,38 +77,6 @@ export function Toolbar({ onOpenImport }: Props) {
       <Divider />
 
       <SearchInput value={search} onChange={setSearch} />
-
-      <div className="flex-1" />
-
-      {/* CENTER: layout algorithm + relayout + fit-to-screen */}
-      <SegmentedControl
-        ariaLabel="布局方式"
-        items={[
-          { id: 'fcose', label: '力导向', icon: <ForceIcon /> },
-          { id: 'dagre', label: '分层', icon: <LayersIcon /> },
-        ]}
-        value={layout}
-        onChange={(v) => setLayout(v as 'fcose' | 'dagre')}
-      />
-
-      {/* Re-run the active layout against existing nodes for a fresh shuffle.
-          Disabled before a schema is loaded since there's nothing to optimize. */}
-      <IconButton
-        onClick={relayoutCurrent}
-        title="重置布局：用当前算法重新优化节点位置"
-        ariaLabel="重置布局"
-        disabled={!hasSchema}
-      >
-        <RelayoutIcon />
-      </IconButton>
-
-      <IconButton
-        onClick={() => getCy<Core>()?.fit(undefined, 60)}
-        title="适应屏幕"
-        ariaLabel="适应屏幕"
-      >
-        <FitIcon />
-      </IconButton>
 
       <div className="flex-1" />
 
@@ -159,94 +117,6 @@ function Divider() {
   return <div className="h-5 w-px bg-ink-100 dark:bg-inkd-300" aria-hidden />;
 }
 
-function IconButton({
-  onClick,
-  title,
-  ariaLabel,
-  disabled,
-  children,
-}: {
-  onClick: () => void;
-  title: string;
-  ariaLabel: string;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      className={clsx(
-        'inline-flex items-center justify-center h-8 w-8 rounded-md',
-        'text-ink-600 dark:text-inkd-600',
-        'hover:bg-ink-50 dark:hover:bg-inkd-200',
-        'hover:text-ink-800 dark:hover:text-inkd-800',
-        'active:bg-ink-100 dark:active:bg-inkd-300',
-        'disabled:text-ink-300 dark:disabled:text-inkd-400',
-        'disabled:hover:bg-transparent disabled:cursor-not-allowed',
-        'transition-colors',
-      )}
-      onClick={onClick}
-      title={title}
-      aria-label={ariaLabel}
-      disabled={disabled}
-    >
-      {children}
-    </button>
-  );
-}
-
-interface SegmentedItem<T extends string> {
-  id: T;
-  label: string;
-  icon?: React.ReactNode;
-}
-
-function SegmentedControl<T extends string>({
-  items,
-  value,
-  onChange,
-  ariaLabel,
-}: {
-  items: SegmentedItem<T>[];
-  value: T;
-  onChange: (v: T) => void;
-  ariaLabel: string;
-}) {
-  return (
-    <div
-      role="radiogroup"
-      aria-label={ariaLabel}
-      className={clsx(
-        'inline-flex items-center h-8 p-0.5 rounded-md',
-        'bg-ink-50 dark:bg-inkd-200',
-        'border border-ink-100 dark:border-inkd-300',
-      )}
-    >
-      {items.map((it) => {
-        const active = it.id === value;
-        return (
-          <button
-            key={it.id}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(it.id)}
-            className={clsx(
-              'inline-flex items-center gap-1 h-7 px-2 rounded text-[11px] font-medium transition-colors',
-              active
-                ? 'bg-white dark:bg-inkd-100 text-ink-800 dark:text-inkd-800 shadow-sm border border-ink-100 dark:border-inkd-300'
-                : 'text-ink-500 dark:text-inkd-600 hover:text-ink-800 dark:hover:text-inkd-800',
-            )}
-          >
-            {it.icon}
-            <span>{it.label}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 /**
  * Debounced search input. The user types freely into local state, and the
  * store-level `search` (which drives the expensive canvas-wide selection
@@ -256,6 +126,10 @@ function SegmentedControl<T extends string>({
  */
 function SearchInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [local, setLocal] = useState(value);
+  const total = useApp((s) => s.searchMatchIds.length);
+  const activeIndex = useApp((s) => s.searchActiveIndex);
+  const cycle = useApp((s) => s.cycleSearchMatch);
+
   useEffect(() => {
     setLocal(value);
   }, [value]);
@@ -265,39 +139,110 @@ function SearchInput({ value, onChange }: { value: string; onChange: (v: string)
     return () => window.clearTimeout(t);
   }, [local, value, onChange]);
 
+  const hasQuery = local.trim().length > 0;
+
   return (
-    <div className="relative">
-      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-400 dark:text-inkd-500 pointer-events-none">
-        <SearchIcon />
-      </span>
-      <input
-        className={clsx(
-          'h-8 w-48 pl-7 pr-7 text-xs rounded-md',
-          'border border-ink-200 dark:border-inkd-300',
-          'bg-white dark:bg-inkd-100',
-          'text-ink-800 dark:text-inkd-800',
-          'focus:outline-none focus:border-ink-400 dark:focus:border-inkd-500',
-          'focus:ring-1 focus:ring-ink-200 dark:focus:ring-inkd-400',
-          'placeholder:text-ink-300 dark:placeholder:text-inkd-500 transition',
-        )}
-        placeholder="搜索表 / 列"
-        value={local}
-        onChange={(e) => setLocal(e.target.value)}
-      />
-      {local && (
-        <button
-          type="button"
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-ink-300 dark:text-inkd-500 hover:text-ink-600 dark:hover:text-inkd-700"
-          onClick={() => {
-            setLocal('');
-            onChange('');
+    <div className="flex items-center gap-1">
+      <div className="relative">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-400 dark:text-inkd-500 pointer-events-none">
+          <SearchIcon />
+        </span>
+        <input
+          className={clsx(
+            'h-8 w-48 pl-7 pr-7 text-xs rounded-md',
+            'border border-ink-200 dark:border-inkd-300',
+            'bg-white dark:bg-inkd-100',
+            'text-ink-800 dark:text-inkd-800',
+            'focus:outline-none focus:border-ink-400 dark:focus:border-inkd-500',
+            'focus:ring-1 focus:ring-ink-200 dark:focus:ring-inkd-400',
+            'placeholder:text-ink-300 dark:placeholder:text-inkd-500 transition',
+          )}
+          placeholder="搜索表 / 列"
+          value={local}
+          title="回车跳到下一个匹配 · Shift+回车 上一个"
+          onChange={(e) => setLocal(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            // Flush the debounce so the match list is current before stepping.
+            if (local !== value) onChange(local);
+            cycle(e.shiftKey ? -1 : 1);
           }}
-          aria-label="清除搜索"
-        >
-          <ClearIcon />
-        </button>
+        />
+        {local && (
+          <button
+            type="button"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-ink-300 dark:text-inkd-500 hover:text-ink-600 dark:hover:text-inkd-700"
+            onClick={() => {
+              setLocal('');
+              onChange('');
+            }}
+            aria-label="清除搜索"
+          >
+            <ClearIcon />
+          </button>
+        )}
+      </div>
+      {/* Find-style match counter + step controls. The canvas centers on the
+          active match and rings it; Enter / these buttons cycle through them. */}
+      {hasQuery && (
+        <div className="flex items-center gap-0.5 shrink-0">
+          <span
+            className={clsx(
+              'text-[10.5px] tabular-nums min-w-[2.4rem] text-center',
+              total > 0 ? 'text-ink-500 dark:text-inkd-600' : 'text-ink-300 dark:text-inkd-500',
+            )}
+            aria-live="polite"
+            title="当前匹配 / 匹配总数"
+          >
+            {total > 0 ? `${Math.max(activeIndex + 1, 0)}/${total}` : '0/0'}
+          </span>
+          <MatchNavButton
+            label="上一个匹配 (Shift+回车)"
+            glyph="▲"
+            disabled={total === 0}
+            onClick={() => cycle(-1)}
+          />
+          <MatchNavButton
+            label="下一个匹配 (回车)"
+            glyph="▼"
+            disabled={total === 0}
+            onClick={() => cycle(1)}
+          />
+        </div>
       )}
     </div>
+  );
+}
+
+function MatchNavButton({
+  label,
+  glyph,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  glyph: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={clsx(
+        'h-6 w-5 flex items-center justify-center rounded text-[9px] leading-none',
+        'text-ink-400 dark:text-inkd-500',
+        'hover:bg-ink-50 hover:text-ink-700 dark:hover:bg-inkd-200 dark:hover:text-inkd-800',
+        'disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-400',
+        'transition-colors',
+      )}
+    >
+      {glyph}
+    </button>
   );
 }
 

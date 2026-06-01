@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import type { Column, Table } from '../../parser/types';
 import { columnRoleBadge, FIELD_ROW_HEIGHT, shortType } from '../buildGraph';
+import { highlightMatch } from './highlight';
 
 interface ColumnRowProps {
   col: Column;
@@ -9,6 +10,7 @@ interface ColumnRowProps {
   showIndex: boolean;
   showComment: boolean;
   isFk: boolean;
+  query?: string;
 }
 
 /**
@@ -20,7 +22,15 @@ interface ColumnRowProps {
  * Badge column packs PK/FK side-by-side so a column that is both a primary
  * key AND a foreign key shows `PK FK` instead of dropping one badge.
  */
-export function ColumnRow({ col, table, showType, showIndex, showComment, isFk }: ColumnRowProps) {
+export function ColumnRow({
+  col,
+  table,
+  showType,
+  showIndex,
+  showComment,
+  isFk,
+  query = '',
+}: ColumnRowProps) {
   const roleBadge = columnRoleBadge(col, table, showIndex);
   const isPk = roleBadge === 'PK';
   const typeText = showType ? shortType(col.rawType) : '';
@@ -43,8 +53,15 @@ export function ColumnRow({ col, table, showType, showIndex, showComment, isFk }
       )}
       title={tooltip}
     >
-      <div className="flex items-center gap-2 px-2 leading-none" style={{ height: FIELD_ROW_HEIGHT }}>
-        <span className="shrink-0 flex items-center gap-[2px]" style={{ width: 38 }} aria-hidden="true">
+      <div
+        className="flex items-center gap-2 px-2 leading-none"
+        style={{ height: FIELD_ROW_HEIGHT }}
+      >
+        <span
+          className="shrink-0 flex items-center gap-[2px]"
+          style={{ width: 38 }}
+          aria-hidden="true"
+        >
           {roleBadge && <RoleBadge kind={roleBadge as 'PK' | 'U' | 'I'} />}
           {isFk && <FkBadge />}
         </span>
@@ -52,7 +69,7 @@ export function ColumnRow({ col, table, showType, showIndex, showComment, isFk }
           className="text-ink-800 dark:text-inkd-800 flex-1 min-w-0 truncate"
           style={{ fontWeight: isPk ? 600 : 400 }}
         >
-          {col.name}
+          {highlightMatch(col.name, query)}
         </span>
         {typeText && (
           <span
@@ -72,7 +89,7 @@ export function ColumnRow({ col, table, showType, showIndex, showComment, isFk }
           style={{ height: 14 }}
           title={col.comment}
         >
-          {col.comment}
+          {highlightMatch(col.comment, query)}
         </div>
       )}
     </div>
@@ -90,7 +107,12 @@ function RoleBadge({ kind }: { kind: 'PK' | 'U' | 'I' }) {
         ? 'bg-violet-100 text-violet-700 border-violet-300 dark:bg-violet-900/40 dark:text-violet-300 dark:border-violet-700/60'
         : 'bg-ink-100 text-ink-600 border-ink-200 dark:bg-inkd-200 dark:text-inkd-700 dark:border-inkd-300';
   return (
-    <span className={clsx('text-[8.5px] font-bold leading-none px-[3px] py-[1px] rounded border', color)}>
+    <span
+      className={clsx(
+        'text-[8.5px] font-bold leading-none px-[3px] py-[1px] rounded border',
+        color,
+      )}
+    >
       {kind}
     </span>
   );

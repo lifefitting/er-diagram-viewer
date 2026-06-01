@@ -129,11 +129,7 @@ export function InferencePanel() {
             title="全部拒绝（从画布上消失）"
             onClick={() => batchDecide(allKeys, 'reject')}
           />
-          <IconBtn
-            kind="clear"
-            title="清除所有决策（恢复虚线默认）"
-            onClick={resetDecisions}
-          />
+          <IconBtn kind="clear" title="清除所有决策（恢复虚线默认）" onClick={resetDecisions} />
         </span>
       </div>
 
@@ -169,14 +165,16 @@ export function InferencePanel() {
   );
 }
 
-const CONF_META: Record<
-  Confidence,
-  { label: string; dot: string; bar: string; tone: string }
-> = {
+const CONF_META: Record<Confidence, { label: string; dot: string; bar: string; tone: string }> = {
   // dot   = filled circle in the group header (3 × 3 px-ish)
   // bar   = vertical color stripe on the left of each FK row (3px wide)
   // tone  = subtle tint applied to the row's left side for extra signal
-  high: { label: '高', dot: 'bg-emerald-500', bar: 'bg-emerald-400', tone: 'before:bg-emerald-400/70' },
+  high: {
+    label: '高',
+    dot: 'bg-emerald-500',
+    bar: 'bg-emerald-400',
+    tone: 'before:bg-emerald-400/70',
+  },
   medium: { label: '中', dot: 'bg-amber-500', bar: 'bg-amber-400', tone: 'before:bg-amber-400/70' },
   low: { label: '低', dot: 'bg-rose-500', bar: 'bg-rose-400', tone: 'before:bg-rose-400/70' },
 };
@@ -307,16 +305,8 @@ function FkRow({ fk, decision, bar, onAccept, onReject, onClear }: FkRowProps) {
           <span className="text-ink-500 dark:text-inkd-600">.{fk.toColumns.join(',')}</span>
         </code>
         <span className="flex items-center gap-0.5 shrink-0">
-          <RowToggleBtn
-            kind="accept"
-            active={accepted}
-            onClick={accepted ? onClear : onAccept}
-          />
-          <RowToggleBtn
-            kind="reject"
-            active={rejected}
-            onClick={rejected ? onClear : onReject}
-          />
+          <RowToggleBtn kind="accept" active={accepted} onClick={accepted ? onClear : onAccept} />
+          <RowToggleBtn kind="reject" active={rejected} onClick={rejected ? onClear : onReject} />
         </span>
       </div>
       {tokens.length > 0 && (
@@ -325,8 +315,7 @@ function FkRow({ fk, decision, bar, onAccept, onReject, onClear }: FkRowProps) {
             <span
               key={t.id}
               className={
-                'text-[9.5px] px-1 py-px rounded font-medium tabular-nums ' +
-                TOKEN_STYLES[t.tone]
+                'text-[9.5px] px-1 py-px rounded font-medium tabular-nums ' + TOKEN_STYLES[t.tone]
               }
               title={t.title}
             >
@@ -464,7 +453,13 @@ function StateIcon({ decision }: { decision: 'accept' | 'reject' | undefined }) 
         aria-label="已接受"
       >
         <svg width="8" height="8" viewBox="0 0 16 16" fill="none" aria-hidden>
-          <path d="M3 8.5l3 3 7-7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d="M3 8.5l3 3 7-7"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       </span>
     );
@@ -476,7 +471,12 @@ function StateIcon({ decision }: { decision: 'accept' | 'reject' | undefined }) 
         aria-label="已拒绝"
       >
         <svg width="8" height="8" viewBox="0 0 16 16" fill="none" aria-hidden>
-          <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+          <path
+            d="M4 4l8 8M12 4l-8 8"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+          />
         </svg>
       </span>
     );
@@ -500,8 +500,7 @@ function RowToggleBtn({ kind, active, onClick }: RowToggleBtnProps) {
   // and clicking clears the decision (the parent passes onClear in that
   // case). The icon stays the same so the user always sees the affordance.
   const isAccept = kind === 'accept';
-  const base =
-    'inline-flex items-center justify-center w-5 h-5 rounded transition-colors';
+  const base = 'inline-flex items-center justify-center w-5 h-5 rounded transition-colors';
   const colorClass = active
     ? isAccept
       ? 'bg-emerald-500 text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500'
@@ -509,11 +508,7 @@ function RowToggleBtn({ kind, active, onClick }: RowToggleBtnProps) {
     : isAccept
       ? 'text-ink-400 dark:text-inkd-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-600 dark:hover:text-emerald-300'
       : 'text-ink-400 dark:text-inkd-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 hover:text-rose-600 dark:hover:text-rose-300';
-  const title = active
-    ? '点击撤销'
-    : isAccept
-      ? '接受 (虚线变实线)'
-      : '拒绝 (从画布上消失)';
+  const title = active ? '点击撤销' : isAccept ? '接受 (虚线变实线)' : '拒绝 (从画布上消失)';
   return (
     <button type="button" className={base + ' ' + colorClass} title={title} onClick={onClick}>
       {isAccept ? (
@@ -560,12 +555,7 @@ function IconBtn({
       'text-ink-500 hover:bg-ink-50 border border-ink-200 dark:text-inkd-600 dark:hover:bg-inkd-200 dark:border-inkd-300',
   };
   return (
-    <button
-      type="button"
-      className={base + ' ' + palette[kind]}
-      title={title}
-      onClick={onClick}
-    >
+    <button type="button" className={base + ' ' + palette[kind]} title={title} onClick={onClick}>
       {kind === 'accept' && (
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
           <path

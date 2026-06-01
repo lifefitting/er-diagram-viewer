@@ -51,15 +51,7 @@ export function SectionIconEye({ size = 14, className }: IconProps = {}) {
 export function SectionIconBlocks({ size = 14, className }: IconProps = {}) {
   return (
     <svg {...baseSvgProps(size, className)}>
-      <rect
-        x="2"
-        y="2"
-        width="5.5"
-        height="5.5"
-        rx="1.1"
-        fill="currentColor"
-        fillOpacity="0.9"
-      />
+      <rect x="2" y="2" width="5.5" height="5.5" rx="1.1" fill="currentColor" fillOpacity="0.9" />
       <rect
         x="8.5"
         y="2"
@@ -101,26 +93,11 @@ export function SectionIconSparklesWand({ size = 14, className }: IconProps = {}
   return (
     <svg {...baseSvgProps(size, className)}>
       {/* wand shaft */}
-      <path
-        d="M3 13 10.5 5.5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
+      <path d="M3 13 10.5 5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       {/* wand tip + small star at tip */}
-      <path
-        d="m9.6 4.6 1.9 1.9"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
+      <path d="m9.6 4.6 1.9 1.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       {/* top-right sparkle */}
-      <path
-        d="M13 2.5v2M12 3.5h2"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
+      <path d="M13 2.5v2M12 3.5h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
       {/* bottom-right sparkle (smaller) */}
       <path
         d="M13.25 9v1.5M12.5 9.75h1.5"
@@ -162,12 +139,7 @@ export function SectionIconWarning({ size = 14, className }: IconProps = {}) {
         strokeWidth="1.4"
         strokeLinejoin="round"
       />
-      <path
-        d="M8 6.4v3.4"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
+      <path d="M8 6.4v3.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <circle cx="8" cy="11.5" r="0.75" fill="currentColor" />
     </svg>
   );
@@ -181,10 +153,7 @@ export function SectionIconWarning({ size = 14, className }: IconProps = {}) {
 export function SparklesIcon({ size = 14, className }: IconProps = {}) {
   return (
     <svg {...baseSvgProps(size, className)}>
-      <path
-        d="M8 2.2 9 6.4l4.2 1L9 8.6 8 12.8 7 8.6 2.8 7.4 7 6.4 8 2.2Z"
-        fill="currentColor"
-      />
+      <path d="M8 2.2 9 6.4l4.2 1L9 8.6 8 12.8 7 8.6 2.8 7.4 7 6.4 8 2.2Z" fill="currentColor" />
       <path
         d="M12.5 11.2 13 12.7l1.4.4-1.4.4-.5 1.5-.5-1.5-1.4-.4 1.4-.4.5-1.5Z"
         fill="currentColor"

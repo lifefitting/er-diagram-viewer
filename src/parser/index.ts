@@ -17,12 +17,24 @@ const KNOWN_UNSUPPORTED: Array<{ test: RegExp; message: string }> = [
     message:
       "PostgreSQL `COMMENT ON` is not supported. Use inline column COMMENT or table-level COMMENT='...' instead.",
   },
-  { test: /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b/i, message: 'CREATE VIEW is skipped (not represented in the ER diagram).' },
-  { test: /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?MATERIALIZED\s+VIEW\b/i, message: 'CREATE MATERIALIZED VIEW is skipped.' },
+  {
+    test: /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\b/i,
+    message: 'CREATE VIEW is skipped (not represented in the ER diagram).',
+  },
+  {
+    test: /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?MATERIALIZED\s+VIEW\b/i,
+    message: 'CREATE MATERIALIZED VIEW is skipped.',
+  },
   { test: /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TRIGGER\b/i, message: 'CREATE TRIGGER is skipped.' },
   { test: /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\b/i, message: 'CREATE FUNCTION is skipped.' },
-  { test: /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\b/i, message: 'CREATE PROCEDURE is skipped.' },
-  { test: /^\s*CREATE\s+SEQUENCE\b/i, message: 'CREATE SEQUENCE is skipped (column-level SERIAL/IDENTITY is still detected).' },
+  {
+    test: /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?PROCEDURE\b/i,
+    message: 'CREATE PROCEDURE is skipped.',
+  },
+  {
+    test: /^\s*CREATE\s+SEQUENCE\b/i,
+    message: 'CREATE SEQUENCE is skipped (column-level SERIAL/IDENTITY is still detected).',
+  },
   { test: /^\s*CREATE\s+TYPE\b/i, message: 'CREATE TYPE is skipped.' },
 ];
 
@@ -39,7 +51,11 @@ export function parseSql(sql: string): Schema {
     if (upper.startsWith('CREATE') && /\bTABLE\b/i.test(upper.slice(0, 50))) {
       const result = parseCreateTable(clean);
       if (!result) {
-        warnings.push({ line: stmt.startLine, message: 'Could not parse CREATE TABLE', snippet: preview(stmt.text) });
+        warnings.push({
+          line: stmt.startLine,
+          message: 'Could not parse CREATE TABLE',
+          snippet: preview(stmt.text),
+        });
         continue;
       }
       // Inline column REFERENCES (e.g. `user_id INT REFERENCES users(id)`)
@@ -59,7 +75,11 @@ export function parseSql(sql: string): Schema {
     if (upper.startsWith('ALTER')) {
       const eff = parseAlterTable(clean);
       if (!eff) {
-        warnings.push({ line: stmt.startLine, message: 'ALTER TABLE clause ignored', snippet: preview(stmt.text) });
+        warnings.push({
+          line: stmt.startLine,
+          message: 'ALTER TABLE clause ignored',
+          snippet: preview(stmt.text),
+        });
         continue;
       }
       explicitForeignKeys.push(...eff.foreignKeys);
@@ -85,7 +105,11 @@ export function parseSql(sql: string): Schema {
 
     const unsupported = KNOWN_UNSUPPORTED.find((u) => u.test.test(clean));
     if (unsupported) {
-      warnings.push({ line: stmt.startLine, message: unsupported.message, snippet: preview(stmt.text) });
+      warnings.push({
+        line: stmt.startLine,
+        message: unsupported.message,
+        snippet: preview(stmt.text),
+      });
       continue;
     }
 

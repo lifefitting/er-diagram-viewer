@@ -1,9 +1,4 @@
-declare module 'cytoscape-fcose' {
-  const ext: cytoscape.Ext;
-  export default ext;
-}
-
-declare module 'cytoscape-dagre' {
-  const ext: cytoscape.Ext;
-  export default ext;
-}
+// Ambient module declarations for third-party packages without bundled types.
+// (Currently empty — kept so future plugins can be added without searching
+// for the right location.)
+export {};

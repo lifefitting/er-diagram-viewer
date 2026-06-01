@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useApp, effectiveForeignKeys } from '../../store';
+import { useApp, effectiveForeignKeys, visibleSchema } from '../../store';
 import type { Core } from 'cytoscape';
 import { getCy } from '../../diagram/cyHandle';
 import { appendInferredToScript } from '../../exports/toDdl';
@@ -25,20 +25,25 @@ export function ExportMenu() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<null | 'png' | 'svg'>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const schema = useApp((s) => s.schema);
+  const rawSchema = useApp((s) => s.schema);
   const modules = useApp((s) => s.modules);
   const inferred = useApp((s) => s.inferred);
   const decisions = useApp((s) => s.decisions);
+  const deletedTables = useApp((s) => s.deletedTables);
   const rawSql = useApp((s) => s.rawSql);
   const display = useApp((s) => s.display);
   const themePref = useApp((s) => s.theme);
   const showLow = display.showLowConfidence;
 
+  // Exports follow what's on the canvas — recycle-bin'd tables (and their FKs)
+  // are filtered out.
+  const schema = useMemo(() => visibleSchema(rawSchema, deletedTables), [rawSchema, deletedTables]);
+
   // The same effective FK set the canvas draws, so the exported file matches
-  // the on-screen state including pending/accepted/rejected decisions.
+  // the on-screen state including pending/accepted/rejected decisions + hidden tables.
   const effectiveFks = useMemo(
-    () => (schema ? effectiveForeignKeys(schema, inferred, decisions, showLow) : []),
-    [schema, inferred, decisions, showLow],
+    () => (schema ? effectiveForeignKeys(schema, inferred, decisions, showLow, deletedTables) : []),
+    [schema, inferred, decisions, showLow, deletedTables],
   );
 
   const fkSourceColumns = useMemo(() => buildFkSourceColumns(effectiveFks), [effectiveFks]);
@@ -167,12 +172,7 @@ export function ExportMenu() {
             onClick={exportSvg}
           />
           <div className="my-1 border-t border-ink-100 dark:border-inkd-300" />
-          <MenuItem
-            icon={<CodeIcon />}
-            label="含 FK 的 DDL"
-            hint=".sql"
-            onClick={exportDdl}
-          />
+          <MenuItem icon={<CodeIcon />} label="含 FK 的 DDL" hint=".sql" onClick={exportDdl} />
         </div>
       )}
     </div>
@@ -251,7 +251,12 @@ function ImageIcon() {
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
       <circle cx="6" cy="7" r="1.1" fill="currentColor" />
-      <path d="M3 12l3-3 3 3 2-2 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path
+        d="M3 12l3-3 3 3 2-2 3 3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
