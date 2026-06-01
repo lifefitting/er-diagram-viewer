@@ -15,7 +15,13 @@ export function canonicalize(name: string): string {
 /** Naive singularization: drops trailing s/es/ies (handling a few common cases). */
 export function singularize(name: string): string {
   if (name.endsWith('ies') && name.length > 3) return name.slice(0, -3) + 'y';
-  if (name.endsWith('ses') || name.endsWith('xes') || name.endsWith('zes') || name.endsWith('ches') || name.endsWith('shes')) {
+  if (
+    name.endsWith('ses') ||
+    name.endsWith('xes') ||
+    name.endsWith('zes') ||
+    name.endsWith('ches') ||
+    name.endsWith('shes')
+  ) {
     return name.slice(0, -2);
   }
   if (name.endsWith('s') && !name.endsWith('ss')) return name.slice(0, -1);
@@ -29,13 +35,33 @@ export function pluralize(name: string): string {
   return name + 's';
 }
 
-/** Strip a trailing `_id` / `Id` from a column name. Returns null if it has no id suffix. */
-export function stripIdSuffix(colName: string): string | null {
-  if (colName.endsWith('_id') && colName.length > 3) return colName.slice(0, -3);
+export interface FkSuffixMatch {
+  /** Column name with the FK suffix removed (e.g. `credential_ref` → `credential`). */
+  base: string;
+  /** Which suffix family matched — surfaced in the inference reason. */
+  via: 'id' | 'ref';
+}
+
+/**
+ * Strip a trailing foreign-key-ish suffix from a column name and report which
+ * family matched: `_id` / `Id` (the classic case) or `_ref` / `Ref` (common in
+ * schemas that name FK columns after the *relationship* rather than the id,
+ * e.g. `credential_ref → iam_credential.id`). Returns null when the column has
+ * no such suffix, or is a bare `id` / `ref` (which point at nothing).
+ *
+ * The camelCase forms (`Id` / `Ref`) require a lowercase char immediately
+ * before the capital so all-caps names and acronyms aren't mis-split.
+ */
+export function stripFkSuffix(colName: string): FkSuffixMatch | null {
+  if (colName.endsWith('_id') && colName.length > 3) return { base: colName.slice(0, -3), via: 'id' };
+  if (colName.endsWith('_ref') && colName.length > 4)
+    return { base: colName.slice(0, -4), via: 'ref' };
   if (colName.endsWith('Id') && colName.length > 2 && /[a-z]/.test(colName[colName.length - 3])) {
-    return colName.slice(0, -2);
+    return { base: colName.slice(0, -2), via: 'id' };
   }
-  if (colName.toLowerCase() === 'id') return null;
+  if (colName.endsWith('Ref') && colName.length > 3 && /[a-z]/.test(colName[colName.length - 4])) {
+    return { base: colName.slice(0, -3), via: 'ref' };
+  }
   return null;
 }
 
@@ -74,6 +100,26 @@ export function tailFallbacks(base: string): string[] {
   const out: string[] = [];
   for (let i = 1; i < parts.length; i++) {
     out.push(parts.slice(i).join('_'));
+  }
+  return out;
+}
+
+/**
+ * Cumulative leading namespace prefixes of a table name, each ending in `_`,
+ * shortest first: `iam_credential_device` → `['iam_', 'iam_credential_']`.
+ *
+ * Used to resolve FK columns that name a same-namespace table by its bare
+ * entity name — `credential_ref` in `iam_credential_device` should reach
+ * `iam_credential`, which `candidateBaseNames('credential')` never produces.
+ * The full table name is never returned (a table doesn't prefix itself).
+ */
+export function tablePrefixes(tableName: string): string[] {
+  const parts = canonicalize(tableName).split('_').filter(Boolean);
+  const out: string[] = [];
+  let acc = '';
+  for (let i = 0; i < parts.length - 1; i++) {
+    acc += parts[i] + '_';
+    out.push(acc);
   }
   return out;
 }

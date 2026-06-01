@@ -36,3 +36,7 @@ coverage/
 .playwright-mcp/
 test-results/
 playwright-report/
+
+# Claude Code (local-only settings + runtime locks)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

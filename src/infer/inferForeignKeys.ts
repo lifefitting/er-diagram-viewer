@@ -1,7 +1,15 @@
 import type { Column, ForeignKey, Schema, Table } from '../parser/types';
 import { typesCompatible } from '../parser/normalizeType';
 import { canonicalFkKey } from '../parser/utils';
-import { canonicalize, candidateBaseNames, pluralize, singularize, stripIdSuffix, tailFallbacks } from './nameMatching';
+import {
+  canonicalize,
+  candidateBaseNames,
+  pluralize,
+  singularize,
+  stripFkSuffix,
+  tablePrefixes,
+  tailFallbacks,
+} from './nameMatching';
 
 export type Confidence = 'high' | 'medium' | 'low';
 
@@ -31,8 +39,9 @@ export function inferForeignKeys(schema: Schema): InferredFK[] {
         if (col.name.toLowerCase() === 'id') continue;
       }
 
-      const base = stripIdSuffix(col.name);
-      if (!base) continue;
+      const stripped = stripFkSuffix(col.name);
+      if (!stripped) continue;
+      const base = stripped.base;
 
       const result = pickBestTarget(base, col, table, tableIndex);
       if (!result) continue;
@@ -43,6 +52,10 @@ export function inferForeignKeys(schema: Schema): InferredFK[] {
         // Self-reference inferred only if base matches table singular form clearly
         if (canonicalize(base) !== canonicalize(singularize(table.name))) continue;
       }
+
+      // Note the matched suffix family so the inference panel explains why a
+      // `_ref`-named column was treated as a foreign key.
+      if (stripped.via === 'ref') result.reason += ' (column uses _ref suffix)';
 
       inferred.push(buildFk(table, col, result));
     }
@@ -67,11 +80,18 @@ function pickBestTarget(
 ): MatchResult | null {
   // 1. direct candidates
   const direct = lookupCandidates(base, index);
-  const directHits = direct.filter((t) => t.name.toLowerCase() !== ownTable.name.toLowerCase() || canonicalize(base) === canonicalize(singularize(ownTable.name)));
+  const directHits = direct.filter(
+    (t) =>
+      t.name.toLowerCase() !== ownTable.name.toLowerCase() ||
+      canonicalize(base) === canonicalize(singularize(ownTable.name)),
+  );
 
   const typed = directHits
     .map((t) => withPk(t))
-    .filter((x): x is { table: Table; pk: Column } => x !== null && typesCompatible(col.normalizedType, x.pk.normalizedType));
+    .filter(
+      (x): x is { table: Table; pk: Column } =>
+        x !== null && typesCompatible(col.normalizedType, x.pk.normalizedType),
+    );
 
   if (typed.length > 0) {
     const chosen = chooseAmongTargets(typed, col);
@@ -96,14 +116,48 @@ function pickBestTarget(
       confidence = 'medium';
       reason = 'Name match required prefix normalization';
     }
-    return { target: chosen.table, targetPkColumn: chosen.pk, confidence, reason, fallbackUsed: false };
+    return {
+      target: chosen.table,
+      targetPkColumn: chosen.pk,
+      confidence,
+      reason,
+      fallbackUsed: false,
+    };
+  }
+
+  // 1.5 same-namespace prefix retry: a column like `credential_ref` in table
+  // `iam_credential_device` references `iam_credential`, which the bare base
+  // `credential` never resolves to. Prepend the source table's leading
+  // namespace prefix(es) and retry. Only reached when the direct lookup found
+  // nothing, so it can't change an existing high/medium match.
+  for (const prefix of tablePrefixes(ownTable.name)) {
+    const prefixHits = lookupCandidates(prefix + base, index)
+      .filter((t) => t.name.toLowerCase() !== ownTable.name.toLowerCase())
+      .map(withPk)
+      .filter(
+        (x): x is { table: Table; pk: Column } =>
+          x !== null && typesCompatible(col.normalizedType, x.pk.normalizedType),
+      );
+    if (prefixHits.length > 0) {
+      const chosen = chooseAmongTargets(prefixHits, col);
+      return {
+        target: chosen.table,
+        targetPkColumn: chosen.pk,
+        confidence: 'medium',
+        reason: `Same-namespace prefix match (${base} → ${chosen.table.name})`,
+        fallbackUsed: true,
+      };
+    }
   }
 
   // 2. fallback: compound prefix retry (parent_user_id → user)
   for (const tail of tailFallbacks(base)) {
     const tailHits = lookupCandidates(tail, index)
       .map(withPk)
-      .filter((x): x is { table: Table; pk: Column } => x !== null && typesCompatible(col.normalizedType, x.pk.normalizedType));
+      .filter(
+        (x): x is { table: Table; pk: Column } =>
+          x !== null && typesCompatible(col.normalizedType, x.pk.normalizedType),
+      );
     if (tailHits.length > 0) {
       const chosen = chooseAmongTargets(tailHits, col);
       return {
@@ -149,7 +203,9 @@ function chooseAmongTargets(
   const pool = exactType.length > 0 ? exactType : hits;
   // Prefer indexed source column → target with non-composite PK already enforced above.
   // Among ties, prefer shorter table name (often canonical), then alphabetical.
-  return pool.sort((a, b) => a.table.name.length - b.table.name.length || a.table.name.localeCompare(b.table.name))[0];
+  return pool.sort(
+    (a, b) => a.table.name.length - b.table.name.length || a.table.name.localeCompare(b.table.name),
+  )[0];
 }
 
 function buildTableIndex(tables: Table[]): Map<string, Table> {

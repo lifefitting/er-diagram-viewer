@@ -9,7 +9,12 @@ body,
 }
 
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
   margin: 0;
 }
 
@@ -27,6 +32,24 @@ body {
     linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
   background-size: 32px 32px;
+  /* Marquee drags must not paint a native text selection across overlays. */
+  user-select: none;
+}
+
+/*
+ * Canvas cursor feedback. cytoscape writes an inline `cursor` onto its
+ * container/canvas as the pointer moves, so a plain class can't override it —
+ * these rules are !important and also target the inner <canvas> so the cursor
+ * holds over the whole drawing surface. SELECT mode keeps the default arrow (no
+ * class); grab/grabbing = the hand tool / Space / middle-button pan.
+ */
+.cy-cursor-grab,
+.cy-cursor-grab canvas {
+  cursor: grab !important;
+}
+.cy-cursor-grabbing,
+.cy-cursor-grabbing canvas {
+  cursor: grabbing !important;
 }
 
 .dark .cy-container {

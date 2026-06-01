@@ -3,6 +3,7 @@ import type { DisplayOptions } from '../../store';
 import type { NodePos, OverlayState } from '../types';
 import { ColumnRow } from './ColumnRow';
 import { TableHeader } from './TableHeader';
+import { highlightMatch } from './highlight';
 
 interface TableOverlayProps {
   pos: NodePos;
@@ -14,6 +15,17 @@ interface TableOverlayProps {
   fkColumns: Set<string> | undefined;
   /** True if the user has dragged this card's width manually. */
   hasManualWidth: boolean;
+  /** Member of the explicit multi-select group (drags together; sky ring). */
+  selected?: boolean;
+  /** The current search match the canvas is centered on (find navigation) —
+   *  gets a stronger ring so "which one now" is obvious among the matches. */
+  activeMatch?: boolean;
+  /** When false (pan/hand mode), the card ignores pointer events so a drag pans
+   *  the canvas instead of moving the card. */
+  interactive?: boolean;
+  /** Active search query; matching substrings in name/comment/columns get a
+   *  yellow find-highlight. */
+  query?: string;
   onDragHandle: (e: React.MouseEvent) => void;
   onResizeHandle: (e: React.MouseEvent) => void;
   onToggleCollapse: () => void;
@@ -35,14 +47,28 @@ export function TableOverlay({
   flashing,
   fkColumns,
   hasManualWidth,
+  selected = false,
+  activeMatch = false,
+  interactive = true,
+  query = '',
   onDragHandle,
   onResizeHandle,
   onToggleCollapse,
   onResetWidth,
 }: TableOverlayProps) {
   const { table, x, y, w, h, moduleColor } = pos;
-  const ringClass =
-    flashing || state === 'match' ? 'ring-2 ring-amber-500' : state === 'dim' ? 'opacity-25' : '';
+  // The active find-match gets the strongest ring + a glow so it stands out
+  // among the other (amber) matches; otherwise amber focus/search match wins
+  // over the sky multi-select ring. Dim opacity is independent, so a dimmed
+  // card can still show it's in the drag group.
+  const ring = activeMatch
+    ? 'ring-4 ring-amber-500 shadow-amber-500/40 z-10'
+    : flashing || state === 'match'
+      ? 'ring-2 ring-amber-500'
+      : selected
+        ? 'ring-2 ring-sky-500'
+        : '';
+  const dimOpacity = state === 'dim' ? 'opacity-25' : '';
   const visibleColumns = collapsed
     ? []
     : display.onlyPk
@@ -57,7 +83,8 @@ export function TableOverlay({
         // dark mode uses the elevated-surface color (inkd-100) so it doesn't
         // get lost on the inkd-50 page background.
         'bg-white dark:bg-inkd-100',
-        ringClass,
+        ring,
+        dimOpacity,
       )}
       style={{
         left: x,
@@ -66,6 +93,9 @@ export function TableOverlay({
         height: h,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         border: `1px solid ${moduleColor.border}`,
+        // In pan mode the card is click-through so a drag pans the canvas
+        // instead of grabbing the card (overrides the pointer-events-auto class).
+        ...(interactive ? null : { pointerEvents: 'none' as const }),
       }}
     >
       <TableHeader
@@ -73,6 +103,7 @@ export function TableOverlay({
         moduleKey={pos.moduleKey}
         moduleColor={moduleColor}
         collapsed={collapsed}
+        query={query}
         onDragHandle={onDragHandle}
         onToggleCollapse={onToggleCollapse}
       />
@@ -86,7 +117,7 @@ export function TableOverlay({
           style={{ height: 18 }}
           title={table.comment}
         >
-          {table.comment}
+          {highlightMatch(table.comment, query)}
         </div>
       )}
       {!collapsed && (
@@ -100,6 +131,7 @@ export function TableOverlay({
               showIndex={display.showIndex}
               showComment={display.showComment}
               isFk={fkColumns?.has(c.name) ?? false}
+              query={query}
             />
           ))}
         </div>

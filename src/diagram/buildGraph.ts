@@ -2,6 +2,7 @@ import type { ElementDefinition } from 'cytoscape';
 import type { Column, ForeignKey, Schema, Table } from '../parser/types';
 import { colorForTableModule, type ModulesResult } from '../infer/inferModules';
 import { fkKey } from '../infer/inferForeignKeys';
+import { darkEdgeColor } from './edgeColor';
 
 export interface BuiltElements {
   elements: ElementDefinition[];
@@ -201,10 +202,7 @@ export function tableBoxSize(
  * row), we can no longer derive this from `rowIdx * ROW_HEIGHT`; the canvas
  * needs an exact table to compute per-field FK endpoints.
  */
-export function columnRowOffsets(
-  table: Table,
-  display: BuildDisplayOpts,
-): number[] {
+export function columnRowOffsets(table: Table, display: BuildDisplayOpts): number[] {
   const hasSubtitle = !!(table.comment && table.comment.trim());
   let cursor = HEADER_HEIGHT + (hasSubtitle ? SUBTITLE_HEIGHT + SUBTITLE_BORDER : 0);
   const offsets: number[] = [];
@@ -273,6 +271,11 @@ export function buildElements(
   // Index lookups for column→row index (used for per-field edge endpoints).
   const tableByName = new Map(schema.tables.map((t) => [t.name, t] as const));
 
+  // Stable per-edge key for manual-route overrides. canonicalFkKey is stable
+  // across rebuilds (unlike the index-prefixed `id`); on the rare collision
+  // (duplicate column-pair) we disambiguate with the build index.
+  const seenFkKeys = new Set<string>();
+
   for (const [i, fk] of fks.entries()) {
     const fromMod = modules.byTable.get(fk.fromTable);
     const toMod = modules.byTable.get(fk.toTable);
@@ -291,18 +294,26 @@ export function buildElements(
     // Solid iff: explicitly declared in DDL, OR user accepted this inferred FK.
     // Everything else (inferred + not yet decided, regardless of confidence) is
     // rendered dashed. Once accepted via the InferencePanel it turns solid.
-    const accepted = fk.source === 'explicit' || decisions[fkKey(fk)] === 'accept';
+    const baseKey = fkKey(fk);
+    const accepted = fk.source === 'explicit' || decisions[baseKey] === 'accept';
     const lineStyle: 'solid' | 'dashed' = accepted ? 'solid' : 'dashed';
+    const edgeFkKey = seenFkKeys.has(baseKey) ? `${baseKey}#${i}` : baseKey;
+    seenFkKeys.add(baseKey);
 
     elements.push({
       group: 'edges',
       data: {
         id: `e_${i}_${fk.fromTable}_${fk.fromColumns.join('-')}__${fk.toTable}`,
+        fkKey: edgeFkKey,
         source: nodeId(fk.fromTable),
         target: nodeId(fk.toTable),
-        confidence: fk.source === 'explicit' ? 'high' : fk.confidence ?? 'medium',
+        confidence: fk.source === 'explicit' ? 'high' : (fk.confidence ?? 'medium'),
         lineStyle,
         color,
+        // Dark-canvas-safe variant of `color`: dark palette hues (mono, earth,
+        // darker vibrant) are lifted to a visible lightness. The canvas swaps
+        // to this in dark mode; light-mode + light exports keep `color`.
+        colorDark: darkEdgeColor(color),
         crossModule: sameModule ? 'no' : 'yes',
         srcRowIdx,
         tgtRowIdx,
