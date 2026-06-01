@@ -365,6 +365,42 @@ export function segmentsFromPoints(points: Pt[]): { weights: string; distances: 
   };
 }
 
+// ---- routePoints / endpoint string codec ----------------------------------
+// The single source of truth for the `"x,y x,y …"` route encoding and the
+// `"<x>px <y>px"` endpoint-offset encoding shared by the canvas, the routing
+// pass and the SVG export. Keeping encode+parse together stops the formats from
+// drifting (precision, separators, NaN handling) across the call sites.
+
+/** Encode an absolute polyline as the `routePoints` string (1dp). */
+export function pointsToRoute(pts: Pt[]): string {
+  return pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+}
+
+/** Parse a `routePoints` string back to points, skipping empty/non-finite tokens. */
+export function routeToPoints(s: string | undefined | null): Pt[] {
+  const out: Pt[] = [];
+  for (const tok of (s ?? '').split(' ')) {
+    if (!tok) continue;
+    const [x, y] = tok.split(',').map(Number);
+    if (Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y });
+  }
+  return out;
+}
+
+/** Encode a port endpoint offset as the cytoscape `"<x>px <y>px"` string (1dp). */
+export function formatEndpoint(off: Pt): string {
+  return `${off.x.toFixed(1)}px ${off.y.toFixed(1)}px`;
+}
+
+/** Parse a `"<x>px <y>px"` endpoint string; null for the `outside-to-node`
+ *  placeholder or any malformed value (caller falls back gracefully). */
+export function parseEndpoint(s: unknown): Pt | null {
+  if (typeof s !== 'string') return null;
+  const m = /^(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px$/.exec(s.trim());
+  if (!m) return null;
+  return { x: parseFloat(m[1]), y: parseFloat(m[2]) };
+}
+
 /**
  * Shift one *interior* orthogonal segment of a route perpendicular to itself,
  * keeping the path H/V-only. The segment between `points[segIndex]` and

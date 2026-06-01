@@ -20,6 +20,11 @@ export interface LayoutSnapshot {
   positions: Record<string, { x: number; y: number }>;
   widths: Record<string, number>;
   routes: Record<string, { x: number; y: number }[]>;
+  /** Routing mode at capture time: `false` = pristine dagre channels (a fresh
+   *  layout), `true` = live obstacle-avoiding detours (after a manual move). So
+   *  undoing back to a pristine baseline restores its static routing rather than
+   *  re-detouring. Optional for back-compat with snapshots that predate it. */
+  manualMove?: boolean;
 }
 
 /** The imperative view API bound by DiagramCanvas. `cy` is typed-as-unknown so
@@ -129,10 +134,12 @@ export function pushHistory(s: LayoutSnapshot): void {
   syncFlags();
 }
 
-export function undo(): void {
-  if (undoStack.length === 0 || !applyFn) return;
-  if (lastSnapshot) redoStack.push(lastSnapshot);
-  lastSnapshot = undoStack.pop() ?? null;
+/** Pop one snapshot off `from`, push the current onto `to`, and apply it.
+ *  undo = (undoStack → redoStack), redo = (redoStack → undoStack). */
+function step(from: LayoutSnapshot[], to: LayoutSnapshot[]): void {
+  if (from.length === 0 || !applyFn) return;
+  if (lastSnapshot) to.push(lastSnapshot);
+  lastSnapshot = from.pop() ?? null;
   if (!lastSnapshot) return;
   isApplying = true;
   try {
@@ -143,18 +150,12 @@ export function undo(): void {
   syncFlags();
 }
 
+export function undo(): void {
+  step(undoStack, redoStack);
+}
+
 export function redo(): void {
-  if (redoStack.length === 0 || !applyFn) return;
-  if (lastSnapshot) undoStack.push(lastSnapshot);
-  lastSnapshot = redoStack.pop() ?? null;
-  if (!lastSnapshot) return;
-  isApplying = true;
-  try {
-    applyFn(lastSnapshot);
-  } finally {
-    isApplying = false;
-  }
-  syncFlags();
+  step(redoStack, undoStack);
 }
 
 /** True while a snapshot is being applied — capture points check this so an

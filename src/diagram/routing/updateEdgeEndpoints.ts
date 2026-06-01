@@ -11,6 +11,8 @@ import {
   reDockOverride,
   sideBracketRoute,
   buildObstacles,
+  formatEndpoint,
+  pointsToRoute,
   type Pt,
   type Rect,
 } from './channelRoute';
@@ -63,6 +65,7 @@ export function updateEdgeEndpoints(
     const arr = columnRowOffsets(table, {
       showComment: display.showComment,
       showType: display.showType,
+      onlyPk: display.onlyPk,
     });
     offsetsCache.set(table.name, arr);
     return arr;
@@ -104,8 +107,14 @@ export function updateEdgeEndpoints(
       const tgtTable = tableById.get(tgt.id());
       const srcOffs = rowOffsets(srcTable);
       const tgtOffs = rowOffsets(tgtTable);
-      const srcY = srcRowIdx >= 0 && srcRowIdx < srcOffs.length ? srcOffs[srcRowIdx] : null;
-      const tgtY = tgtRowIdx >= 0 && tgtRowIdx < tgtOffs.length ? tgtOffs[tgtRowIdx] : null;
+      // A `NaN` offset means the column is hidden (onlyPk mode) — treat it like a
+      // missing row so the port docks to the card center, not a phantom Y.
+      const offAt = (offs: number[], idx: number): number | null => {
+        const v = idx >= 0 && idx < offs.length ? offs[idx] : NaN;
+        return Number.isFinite(v) ? v : null;
+      };
+      const srcY = offAt(srcOffs, srcRowIdx);
+      const tgtY = offAt(tgtOffs, tgtRowIdx);
       const srcPos = src.position();
       const tgtPos = tgt.position();
 
@@ -228,11 +237,11 @@ export function updateEdgeEndpoints(
       }
 
       const { weights, distances } = segmentsFromPoints(pts);
-      e.data('srcEndpoint', `${srcOff.x.toFixed(1)}px ${srcOff.y.toFixed(1)}px`);
-      e.data('tgtEndpoint', `${tgtOff.x.toFixed(1)}px ${tgtOff.y.toFixed(1)}px`);
+      e.data('srcEndpoint', formatEndpoint(srcOff));
+      e.data('tgtEndpoint', formatEndpoint(tgtOff));
       e.data('segWeights', weights);
       e.data('segDistances', distances);
-      e.data('routePoints', pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '));
+      e.data('routePoints', pointsToRoute(pts));
     });
   });
 }
