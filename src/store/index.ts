@@ -6,6 +6,7 @@ import { createDecisionsSlice } from './decisionsSlice';
 import { createDisplaySlice } from './displaySlice';
 import { createCanvasSlice } from './canvasSlice';
 import { createHistorySlice } from './historySlice';
+import { migratePersisted, sanitizePersisted } from './persistMigrate';
 
 export type { AppState, DisplayOptions } from './types';
 export { effectiveForeignKeys, visibleSchema } from './selectors';
@@ -84,6 +85,18 @@ export const useApp = create<AppState>()(
         }
         return out as PersistedAppState;
       },
+      // Runs ONLY on a version mismatch: drop an incompatible old snapshot down
+      // to its rawSql (see persistMigrate). `merge` then validates the result.
+      migrate: (persisted, version) => ({
+        ...(migratePersisted(persisted, version) as Partial<AppState>),
+      }),
+      // Runs on EVERY load: validate each persisted field's shape and drop the
+      // malformed ones (falling back to slice defaults) before shallow-merging
+      // over the initial state. This catches shape drift under the SAME version,
+      // which `migrate` never sees. Valid state passes through unchanged, so the
+      // normal restore path is identical to zustand's default shallow merge.
+      merge: (persisted, current) =>
+        ({ ...current, ...sanitizePersisted(persisted) }) as AppState,
       // After hydration, `schema` is still null. The App-level mount effect
       // calls `reparse()` to repopulate the derived data; we don't do it
       // here to avoid races with React's initial render cycle.
