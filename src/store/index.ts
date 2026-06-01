@@ -5,9 +5,10 @@ import { createSchemaSlice } from './schemaSlice';
 import { createDecisionsSlice } from './decisionsSlice';
 import { createDisplaySlice } from './displaySlice';
 import { createCanvasSlice } from './canvasSlice';
+import { createHistorySlice } from './historySlice';
 
-export type { AppState, DisplayOptions, LayoutKind } from './types';
-export { effectiveForeignKeys } from './selectors';
+export type { AppState, DisplayOptions } from './types';
+export { effectiveForeignKeys, visibleSchema } from './selectors';
 
 /** Bump when the persisted shape changes in a breaking way; older snapshots
  *  are dropped on load instead of producing runtime errors.
@@ -45,6 +46,17 @@ const DERIVED_OR_TRANSIENT_FIELDS = [
   'flashTables',
   'flashTick',
   'search',
+  // Search match navigation is derived from `search` + the live canvas; the
+  // canvas repopulates it on load, so persisting it would only rehydrate a
+  // stale counter.
+  'searchMatchIds',
+  'searchActiveIndex',
+  // canUndo/canRedo mirror the in-module snapshot stacks (cyHandle), which are
+  // session-only and empty after reload — persisting them would rehydrate the
+  // buttons as stale-enabled. canvasMode resets to 'select' on a fresh tab.
+  'canUndo',
+  'canRedo',
+  'canvasMode',
 ] as const satisfies ReadonlyArray<keyof AppState>;
 
 type PersistedAppState = Omit<AppState, (typeof DERIVED_OR_TRANSIENT_FIELDS)[number]>;
@@ -56,6 +68,7 @@ export const useApp = create<AppState>()(
       ...createDecisionsSlice(...a),
       ...createDisplaySlice(...a),
       ...createCanvasSlice(...a),
+      ...createHistorySlice(...a),
     }),
     {
       name: PERSIST_KEY,

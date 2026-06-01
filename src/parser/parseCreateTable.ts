@@ -52,11 +52,16 @@ export function parseCreateTable(stmt: string): CreateTableResult | null {
     if (firstToken === 'CONSTRAINT') {
       const afterName = part.replace(/^\s*CONSTRAINT\s+\S+\s+/i, '');
       const constraintName = part.match(/^\s*CONSTRAINT\s+(\S+)/i)?.[1];
-      handleNamedConstraint(afterName, name, constraintName ? unquoteIdent(constraintName) : undefined, {
-        primaryKey,
-        indexes,
-        foreignKeys,
-      });
+      handleNamedConstraint(
+        afterName,
+        name,
+        constraintName ? unquoteIdent(constraintName) : undefined,
+        {
+          primaryKey,
+          indexes,
+          foreignKeys,
+        },
+      );
       continue;
     }
 
@@ -77,7 +82,12 @@ export function parseCreateTable(stmt: string): CreateTableResult | null {
       continue;
     }
 
-    if (firstToken === 'KEY' || firstToken === 'INDEX' || firstToken === 'FULLTEXT' || firstToken === 'SPATIAL') {
+    if (
+      firstToken === 'KEY' ||
+      firstToken === 'INDEX' ||
+      firstToken === 'FULLTEXT' ||
+      firstToken === 'SPATIAL'
+    ) {
       const cols = extractParenColumns(part);
       const idxName = part.match(/(?:KEY|INDEX)\s+([^\s(]+)?/i)?.[1];
       indexes.push({
@@ -139,10 +149,12 @@ function extractParenColumns(part: string): string[] {
   });
 }
 
-function parseInlineForeignKey(part: string, fromTable: string, constraintName?: string): ForeignKey | null {
-  const m = part.match(
-    /FOREIGN\s+KEY\s*\(([^)]+)\)\s*REFERENCES\s+([^\s(]+)\s*\(([^)]+)\)/i,
-  );
+function parseInlineForeignKey(
+  part: string,
+  fromTable: string,
+  constraintName?: string,
+): ForeignKey | null {
+  const m = part.match(/FOREIGN\s+KEY\s*\(([^)]+)\)\s*REFERENCES\s+([^\s(]+)\s*\(([^)]+)\)/i);
   if (!m) return null;
   const fromColumns = splitTopLevel(m[1]).map(unquoteIdent);
   const target = splitQualified(m[2]);

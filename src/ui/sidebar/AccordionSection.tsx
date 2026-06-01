@@ -138,10 +138,7 @@ export function AccordionSection({
         <span className="flex items-center gap-1.5 pt-[3px] self-start shrink-0">
           <Chevron open={isOpen} />
           {icon && (
-            <span
-              className={'inline-flex items-center justify-center ' + styles.icon}
-              aria-hidden
-            >
+            <span className={'inline-flex items-center justify-center ' + styles.icon} aria-hidden>
               {icon}
             </span>
           )}
@@ -151,9 +148,7 @@ export function AccordionSection({
             instead of pushing the badge off-row when long. */}
         <span className="flex-1 min-w-0 flex flex-col justify-center leading-tight">
           <span className="flex items-center gap-1.5 min-w-0">
-            <span className="font-semibold text-[12.5px] truncate tracking-tight">
-              {title}
-            </span>
+            <span className="font-semibold text-[12.5px] truncate tracking-tight">{title}</span>
             {count !== undefined && (
               <span
                 className={
@@ -167,11 +162,7 @@ export function AccordionSection({
             )}
           </span>
           {hasSubtitle && (
-            <span
-              className={
-                'text-[10.5px] font-normal truncate mt-0.5 ' + styles.subtitle
-              }
-            >
+            <span className={'text-[10.5px] font-normal truncate mt-0.5 ' + styles.subtitle}>
               {subtitle}
             </span>
           )}
@@ -207,7 +198,13 @@ function Chevron({ open }: { open: boolean }) {
         (open ? 'rotate-90' : '')
       }
     >
-      <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M6 4l4 4-4 4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

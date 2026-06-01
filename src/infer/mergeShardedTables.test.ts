@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseSql } from '../parser';
-import {
-  extractShardBase,
-  mergeShardedTables,
-  SHARD_SUFFIX_PATTERNS,
-} from './mergeShardedTables';
+import { extractShardBase, mergeShardedTables, SHARD_SUFFIX_PATTERNS } from './mergeShardedTables';
 
 describe('extractShardBase', () => {
   it('strips _YYYYMM suffixes', () => {

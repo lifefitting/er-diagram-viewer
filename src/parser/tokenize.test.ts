@@ -8,13 +8,13 @@ describe('splitStatements', () => {
     expect(stmts[0].text).toContain("'a;b'");
   });
 
-  it('handles SQL-standard doubled-quote escape (\'\')', () => {
+  it("handles SQL-standard doubled-quote escape ('')", () => {
     const stmts = splitStatements("INSERT INTO t VALUES ('O''Brien;'); SELECT 1;");
     expect(stmts).toHaveLength(2);
     expect(stmts[0].text).toContain("'O''Brien;'");
   });
 
-  it('handles MySQL backslash escape (\\\')', () => {
+  it("handles MySQL backslash escape (\\')", () => {
     const stmts = splitStatements("INSERT INTO t VALUES ('a\\';b'); SELECT 1;");
     expect(stmts).toHaveLength(2);
   });

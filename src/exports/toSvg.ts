@@ -131,11 +131,14 @@ interface EdgeEntry {
   dashed: boolean;
   /** Faded line for low-confidence pending FKs. */
   faint: boolean;
+  /** Absolute orthogonal polyline — the same path the canvas draws. */
+  routePoints: string;
 }
 
 export function buildDiagramSvg(cy: Core, opts: SvgRenderOpts): string {
   const { schema, modules, fkSourceColumns, display } = opts;
   const padding = opts.padding ?? 32;
+  const darkExport = (opts.theme ?? 'light') === 'dark';
   const palette = paletteFor(opts.theme ?? 'light');
 
   // ---------- Collect node entries from current cy state -----------------
@@ -180,9 +183,14 @@ export function buildDiagramSvg(cy: Core, opts: SvgRenderOpts): string {
       sy: sPos.y + srcEndpoint.y,
       tx: tPos.x + tgtEndpoint.x,
       ty: tPos.y + tgtEndpoint.y,
-      color: (e.data('color') as string) ?? palette.textMuted,
+      // Match the on-screen canvas: dark exports use the visibility-lifted
+      // `colorDark` so FK lines don't vanish on the dark export background.
+      color:
+        ((darkExport ? (e.data('colorDark') ?? e.data('color')) : e.data('color')) as string) ??
+        palette.textMuted,
       dashed: e.data('lineStyle') === 'dashed',
       faint: e.data('confidence') === 'low' && e.data('lineStyle') === 'dashed',
+      routePoints: (e.data('routePoints') as string | undefined) ?? '',
     });
   });
 
@@ -197,7 +205,8 @@ export function buildDiagramSvg(cy: Core, opts: SvgRenderOpts): string {
     if (n.x + n.w > maxX) maxX = n.x + n.w;
     if (n.y + n.h > maxY) maxY = n.y + n.h;
   }
-  // Edges can also extend beyond nodes (arrowhead overshoot), be safe.
+  // Edges can also extend beyond nodes (arrowhead overshoot, or a hand-dragged
+  // bend pulled outside the cards), be safe — fold every route point too.
   for (const e of edges) {
     if (e.sx < minX) minX = e.sx;
     if (e.tx < minX) minX = e.tx;
@@ -207,6 +216,15 @@ export function buildDiagramSvg(cy: Core, opts: SvgRenderOpts): string {
     if (e.ty < minY) minY = e.ty;
     if (e.sy > maxY) maxY = e.sy;
     if (e.ty > maxY) maxY = e.ty;
+    for (const tok of e.routePoints.split(' ')) {
+      if (!tok) continue;
+      const [px, py] = tok.split(',').map(Number);
+      if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    }
   }
   if (!isFinite(minX)) {
     // Empty schema fallback.
@@ -275,9 +293,10 @@ function emptySvg(palette: ExportPalette): string {
 }
 
 function renderEdge(e: EdgeEntry): string {
-  // 3-segment H-V-H polyline matching the canvas routing.
-  const mx = (e.sx + e.tx) / 2;
-  const points = `${fmt(e.sx)},${fmt(e.sy)} ${fmt(mx)},${fmt(e.sy)} ${fmt(mx)},${fmt(e.ty)} ${fmt(e.tx)},${fmt(e.ty)}`;
+  // Draw the exact orthogonal route computed for the canvas. If routePoints is
+  // missing (edge added before the canvas ran its first endpoint pass) fall
+  // back to a straight line between the recorded endpoints.
+  const points = e.routePoints || `${fmt(e.sx)},${fmt(e.sy)} ${fmt(e.tx)},${fmt(e.ty)}`;
   const dash = e.dashed ? ' stroke-dasharray="6 4"' : '';
   const opacity = e.faint ? ' opacity="0.55"' : ' opacity="0.85"';
   const stroke = e.color;

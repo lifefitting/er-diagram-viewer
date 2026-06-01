@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useApp } from '../../store';
 import type { ThemePreference } from '../../store/types';
 
@@ -11,6 +11,27 @@ function resolveTheme(pref: ThemePreference): 'light' | 'dark' {
   if (pref === 'light' || pref === 'dark') return pref;
   if (typeof window === 'undefined') return 'light';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+/**
+ * Reactive concrete theme (`'light' | 'dark'`) for consumers that can't read
+ * the `dark` class off `<html>` — notably the cytoscape canvas, whose edge
+ * colors are drawn to a `<canvas>` and must be recomputed (not CSS-themed) when
+ * the theme flips. Tracks the store preference and (for `system`) live OS
+ * changes.
+ */
+export function useResolvedTheme(): 'light' | 'dark' {
+  const theme = useApp((s) => s.theme);
+  const [resolved, setResolved] = useState<'light' | 'dark'>(() => resolveTheme(theme));
+  useEffect(() => {
+    setResolved(resolveTheme(theme));
+    if (theme !== 'system' || typeof window === 'undefined') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => setResolved(resolveTheme(theme));
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [theme]);
+  return resolved;
 }
 
 /**

@@ -1,17 +1,19 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Toolbar } from './ui/overlays/Toolbar';
+import { CanvasControls } from './ui/overlays/CanvasControls';
+import { RecycleBin } from './ui/overlays/RecycleBin';
 import { SqlInputDialog } from './ui/overlays/SqlInputDialog';
 import { Sidebar } from './ui/sidebar/Sidebar';
 import { useApp } from './store';
 import { SAMPLE_ECOMMERCE } from './samples';
 import { useApplyTheme } from './ui/theme/useApplyTheme';
 
-// Lazy-load the diagram canvas. Pulling cytoscape (≈250 KB minified +
-// fcose/dagre layout extensions) only when there's actually a schema to
-// render lets the first paint complete before the graph engine code is
-// even parsed. Combined with the manualChunks split in vite.config.ts,
-// cytoscape ends up in its own cacheable chunk that downloads in
-// parallel with the main bundle but does not block FCP.
+// Lazy-load the diagram canvas. Pulling cytoscape (≈250 KB minified) only
+// when there's actually a schema to render lets the first paint complete
+// before the graph engine code is even parsed. Combined with the
+// manualChunks split in vite.config.ts, cytoscape ends up in its own
+// cacheable chunk that downloads in parallel with the main bundle but
+// does not block FCP.
 const DiagramCanvas = lazy(() => import('./diagram/DiagramCanvas'));
 
 export default function App() {
@@ -64,6 +66,8 @@ export default function App() {
             </div>
           )}
         </main>
+        {schema && schema.tables.length > 0 && <CanvasControls />}
+        {schema && schema.tables.length > 0 && <RecycleBin />}
         <Sidebar collapsed={sidebarCollapsed} />
       </div>
       <SqlInputDialog open={importOpen} onClose={() => setImportOpen(false)} />
@@ -81,9 +85,21 @@ function CanvasLoading() {
   return (
     <div className="h-full w-full flex items-center justify-center bg-ink-50/40 dark:bg-inkd-50/40">
       <div className="flex items-center gap-2 text-ink-400 dark:text-inkd-500 text-[12px]">
-        <svg className="animate-spin" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <svg
+          className="animate-spin"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden
+        >
           <circle cx="8" cy="8" r="6" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
-          <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path
+            d="M14 8a6 6 0 0 0-6-6"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
         </svg>
         正在加载图表引擎…
       </div>

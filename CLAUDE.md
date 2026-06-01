@@ -51,37 +51,49 @@ Parser scope today: MySQL/PG/SQLite **public** DDL subset. **Not handled:** PG `
 Entry: `inferForeignKeys(schema)` in [inferForeignKeys.ts](src/infer/inferForeignKeys.ts).
 
 Rules, in priority order, all enabled by default:
-1. **Name suffix**: column ending in `_id` / `Id`. Strip the suffix to get a base. [nameMatching.ts](src/infer/nameMatching.ts) generates candidate target names by varying singular/plural and stripping `t_`/`tbl_`/`tb_` prefixes.
+1. **Name suffix**: column ending in `_id` / `Id` **or `_ref` / `Ref`** (`stripFkSuffix`). Strip the suffix to get a base. [nameMatching.ts](src/infer/nameMatching.ts) generates candidate target names by varying singular/plural and stripping `t_`/`tbl_`/`tb_` prefixes. If the bare base finds nothing, a **same-namespace prefix retry** (`tablePrefixes`) prepends the *source table's* leading namespace segment(s) and looks again — so `credential_ref` in `iam_credential_device` resolves to `iam_credential` (medium confidence). The camelCase forms require a lowercase char before the capital, so `href`/`XRef` aren't mis-split.
 2. **Type compatibility**: source column's normalized type must match target PK's. `unknown` matches anything.
 3. **Index priority**: when multiple targets tie, prefer the one where the source column is indexed/unique.
 4. **Confidence tiers**: `high` (exact name + type + source indexed) / `medium` (name+type only, or prefix normalization needed) / `low` (compound-prefix fallback like `parent_user_id → users`). `low` is hidden from the canvas unless the user toggles `showLowConfidence` or accepts the FK explicitly.
 
-Explicit FKs from the parser are merged with inferred ones via the helper `effectiveForeignKeys` in [store.ts](src/store.ts); `decisions[fkKey]` overrides confidence-based visibility (accept = always show; reject = always hide).
+Explicit FKs from the parser are merged with inferred ones via the helper `effectiveForeignKeys` in [store/selectors.ts](src/store/selectors.ts); `decisions[fkKey]` overrides confidence-based visibility (accept = always show; reject = always hide).
 
 ### `src/diagram/`
 Cytoscape draws layout + edges only. **Nodes are invisible**: the React component [DiagramCanvas.tsx](src/diagram/DiagramCanvas.tsx) renders each table as an absolutely-positioned HTML overlay synced to the cy node's `renderedBoundingBox` via `pan zoom resize position layoutstop add remove` events.
 
-Why overlays instead of cy native labels: cy's `text-wrap: wrap` + `width: 'label'` interaction was unreliable with multi-line table content; box-drawing chars and column rows didn't measure correctly. The overlay approach gives full HTML/CSS control and works at all zoom levels (zoom is locked to 1.0 after layout — `runLayout` resets `cy.zoom(1)` so overlay text stays crisp; the user wheel-zooms after).
+Why overlays instead of cy native labels: cy's `text-wrap: wrap` + `width: 'label'` interaction was unreliable with multi-line table content; box-drawing chars and column rows didn't measure correctly. The overlay approach gives full HTML/CSS control and works at all zoom levels. After auto-layout, `runLayout`'s `fitWithZoomClamp` fits-to-content but **floors zoom at 1.0** so the first paint never blurs; the user then wheel-zooms (continuous) or steps a fixed ladder (`ZOOM_STOPS` 0.25→4 in `CanvasControls`). The only path that drops below 1.0 is the explicit 全览/fit (`cy.fit` with no clamp). Overlays are synced to each node's `renderedBoundingBox` via `cy.on('pan zoom resize position layoutstop add remove', …)`.
 
-**Tri-state selection** (search OR click focus): a single `Selection = { matches, neighborhood } | null` drives both:
+**Tri-state selection** (search OR click focus): a single `Selection = { matches, neighborhood } | null` (built in [selection/deriveSelection.ts](src/diagram/selection/deriveSelection.ts) + [closedNeighborhood.ts](src/diagram/selection/closedNeighborhood.ts)) drives both:
 - cy edge classes: `highlight` on edges touching a match, `dimmed` on edges with neither endpoint in the neighborhood.
 - overlay class: match → amber ring; in neighborhood (not match) → neutral; outside neighborhood → 30% opacity.
 
-Search matches against table name, table comment, column names, and column comments. If `focusId` is set (click on overlay) it overrides search; clicking blank canvas clears it.
+Search matches against table name, table comment, column names, and column comments. Matched substrings also get a Chrome-style yellow `<mark>` via [overlay/highlight.tsx](src/diagram/overlay/highlight.tsx). If `focusId` is set (click on overlay) it overrides search; clicking blank canvas clears it.
 
-`[buildGraph.ts](src/diagram/buildGraph.ts)` computes per-node `boxWidth` / `boxHeight` from the table's longest column line + whether the table has a comment (adds one subtitle row). The overlay reads these via the synced bounding box.
+**Find-style match navigation**: the canvas publishes the ordered match node ids (sorted top→bottom, left→right) to `store.searchMatchIds`; the toolbar shows an "n / m" counter and `Enter`/`Shift+Enter` (or ▲▼) call `cycleSearchMatch(±1)` to step `searchActiveIndex`. A `searchActiveIndex` effect calls the view's `centerOnNode` to pan-follow the active match, which also gets a stronger ring (`activeMatch` on the overlay). `searchMatchIds`/`searchActiveIndex` are transient (denylisted from persist); the pure wraparound math is `store/searchNav.ts`.
 
-### `src/store.ts`
-Zustand. `setSql(sql)` is the entry into the pipeline: re-parses + re-infers + clears decisions. `effectiveForeignKeys` is the derived selector used by both the canvas and the export-to-DDL code.
+`[buildGraph.ts](src/diagram/buildGraph.ts)` computes per-node `boxWidth` / `boxHeight` from the table's longest column line + whether the table has a comment (adds one subtitle row), and assigns each FK edge a stable `fkKey` (table+column based) so manual routes survive rebuilds. The overlay reads sizes via the synced bounding box.
+
+**Connector routing** (`routing/`): edges are orthogonal polylines, not cytoscape curves. `arrangeForPublication` ([layout/](src/diagram/layout/arrangeForPublication.ts)) ranks tables left-to-right with dagre and stashes channel waypoints; on `layoutstop`, [updateEdgeEndpoints.ts](src/diagram/routing/updateEdgeEndpoints.ts) docks each edge to its field-row port and picks a strategy from [channelRoute.ts](src/diagram/routing/channelRoute.ts) — a direct 2-bend H-V-H through the gutter, a Dijkstra **detour** when blocked, or a **side-bracket** for vertically-stacked cards (`gapX < 0`) — then encodes the path as `routePoints` (read by both the canvas and the SVG export). Dragging a card clears its edges' manual overrides and re-routes live. [overlay/RouteHandles.tsx](src/diagram/overlay/RouteHandles.tsx) lets the user drag a segment's midpoint; the hand-edited path is saved to `manualRoutes` and survives rebuilds. (The old closed-form `computeSegments` module was removed in favor of `channelRoute`.) Each edge is colored by its source table's module `header` color (`data(color)`), which is tuned for the light canvas; in dark mode `applyEdgeTheme` (DiagramCanvas) swaps the stroke to a lightness-floored `data(colorDark)` (computed by [edgeColor.ts](src/diagram/edgeColor.ts)) so dark palettes like `mono` stay visible — the dark SVG/PNG export uses `colorDark` for the same reason, while light mode/exports keep `color`.
+
+**Canvas interaction**: `canvasMode` is `'select'` (marquee + multi-select) or `'pan'` (hand tool; Space-drag and middle-mouse pan in either mode). [selection/marquee.ts](src/diagram/selection/marquee.ts) and [selection/dragGroup.ts](src/diagram/selection/dragGroup.ts) are pure helpers for rubber-band selection and group-move math. [cyHandle.ts](src/diagram/cyHandle.ts) holds the cy instance, an imperative view API (`fit` / `resetZoom` / `zoomToSelection` / `relayout`, bound by the canvas on mount), and a **session-only** undo/redo stack of `LayoutSnapshot`s (positions + widths + routes, cap 50; never persisted).
+
+**Recycle bin**: Delete/Backspace marks tables in `deletedTables`; `visibleSchema` (in [store/selectors.ts](src/store/selectors.ts)) filters those tables and their FKs out of the canvas and every export. [overlay/RecycleBin.tsx](src/ui/overlays/RecycleBin.tsx) (bottom-left) restores them. The SQL is never touched.
+
+### `src/store/`
+Zustand, split into slices assembled in [index.ts](src/store/index.ts): `schemaSlice` (rawSql / schema / inferred / modules), `decisionsSlice` (per-FK accept/reject), `displaySlice` (field-display toggles / search / theme — **no** layout-kind field; the layout picker was removed), `canvasSlice` (collapse / `tableWidths` / `nodePositions` / `manualRoutes` / `deletedTables` / `canvasMode` / flash), `historySlice` (undo/redo flags), plus `selectors.ts` (`effectiveForeignKeys`, `visibleSchema`). [pipeline.ts](src/store/pipeline.ts) runs `parseSql → mergeShardedTables → inferForeignKeys → inferModules`.
+
+`setSql(sql)` is the entry into the pipeline (re-parse + re-infer; **clears** layout — positions, manual routes, deleted tables — for a fresh start). `reparse()` re-derives schema from the persisted `rawSql` on reload but **keeps** the user's layout.
+
+Persistence: the `persist` middleware writes to **sessionStorage** (key `er-viewer:state:v1`, `version: 2`) using a **denylist** (`DERIVED_OR_TRANSIENT_FIELDS`) rather than an allowlist. Derived data (`schema`/`inferred`/`modules`) and transient state (`search`, `canvasMode`, `canUndo`/`canRedo`, `flashTables`/`flashTick`) are NOT saved. So a refresh restores `rawSql` + decisions + display + theme + node positions + widths + manual routes + recycle bin + **camera (`viewport` = pan/zoom)**, but **search clears and pan-mode resets to `select`**. The `viewport` restore (DiagramCanvas debounced `cy.on('pan zoom')` save → one-shot restore in the rebuild effect via `clampPan`) is what makes a refresh reproduce the *exact* prior screen, not just the node positions. sessionStorage (not localStorage) is deliberate: imported DDL may be real production schema, so it must not linger on disk past the tab.
 
 ### `src/ui/` (UI shell)
-Organized by the user's mental model of the screen — split into two physical layers:
+Organized by the user's mental model of the screen — split into physical layers:
 
-- **`src/ui/overlays/`** — floating UI above the canvas: `Toolbar`, `ExportMenu`, `SqlInputDialog`, plus `icons.tsx` for the toolbar's inline SVGs.
+- **`src/ui/overlays/`** — floating UI above the canvas: `Toolbar` (top bar), `CanvasControls` (bottom-right pill cluster: undo/redo · hand tool · zoom ladder · view menu with 缩放至100%/全览/缩放到选中/重置布局/全屏), `RecycleBin` (bottom-left; restores deleted tables), `ExportMenu`, `SqlInputDialog`, plus `icons.tsx`.
 - **`src/ui/sidebar/`** — left-side control panel: `Sidebar` (the shell + `CollapsedSidebarRail` + `GroupHeading`), `DisplayControls`, `InferencePanel`, `ModulesPanel`, `AccordionSection`, plus `icons.tsx` for sidebar-specific glyphs.
-- **`src/ui/theme/`** — `useApplyTheme` hook reading `display.themePreference` from the store and toggling the `dark` class on `<html>`.
+- **`src/ui/theme/`** — `useApplyTheme` hook reading `theme` from the store and toggling the `dark` class on `<html>`.
 
-The export menu calls `getCy()` from `diagram/cyHandle` (bound by `DiagramCanvas` on mount; cleared on unmount) to grab the cy instance for `cy.png({ full: true, scale: 2 })`. DDL export builds `ALTER TABLE ADD CONSTRAINT` lines from `effectiveForeignKeys` filtered to `source === 'inferred'`.
+The export menu calls `getCy()` from `diagram/cyHandle` (bound by `DiagramCanvas` on mount; cleared on unmount) to grab the cy instance for `cy.png({ full: true, scale: 2 })`. Exports run against `visibleSchema`, so recycle-binned tables and their FKs are excluded; SVG export reuses each edge's `routePoints` so the file matches the on-screen routing. DDL export builds `ALTER TABLE ADD CONSTRAINT` lines from `effectiveForeignKeys` filtered to `source === 'inferred'`.
 
 ## HMR caveats
 

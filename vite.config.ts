@@ -103,6 +103,7 @@ export default defineConfig(({ mode }) => {
       globals: true,
       environment: 'node',
       include: ['src/**/*.test.ts'],
+      setupFiles: ['./vitest.setup.ts'],
     },
   };
 });

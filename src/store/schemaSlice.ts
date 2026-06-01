@@ -17,10 +17,17 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       schema,
       inferred,
       modules,
-      // A new schema invalidates everything keyed on table names.
+      // A new schema invalidates everything keyed on table names. Positions,
+      // manual routes and hidden tables are cleared here (import = fresh start)
+      // but NOT in `reparse`, so a page refresh keeps the saved arrangement,
+      // hand-tuned routes and recycle-bin contents.
       decisions: {},
       collapsed: {},
       tableWidths: {},
+      nodePositions: {},
+      manualRoutes: {},
+      deletedTables: {},
+      viewport: null,
       flashTables: [],
     });
   },
