@@ -129,6 +129,7 @@ function SearchInput({ value, onChange }: { value: string; onChange: (v: string)
   const total = useApp((s) => s.searchMatchIds.length);
   const activeIndex = useApp((s) => s.searchActiveIndex);
   const cycle = useApp((s) => s.cycleSearchMatch);
+  const requestStep = useApp((s) => s.requestSearchStep);
 
   useEffect(() => {
     setLocal(value);
@@ -164,9 +165,16 @@ function SearchInput({ value, onChange }: { value: string; onChange: (v: string)
           onKeyDown={(e) => {
             if (e.key !== 'Enter') return;
             e.preventDefault();
-            // Flush the debounce so the match list is current before stepping.
-            if (local !== value) onChange(local);
-            cycle(e.shiftKey ? -1 : 1);
+            const dir = e.shiftKey ? -1 : 1;
+            if (local !== value) {
+              // The query is still being debounced — the match list hasn't
+              // recomputed yet, so stepping now would walk the OLD list. Flush
+              // the query and defer the step until the fresh matches land.
+              onChange(local);
+              requestStep(dir);
+            } else {
+              cycle(dir);
+            }
           }}
         />
         {local && (

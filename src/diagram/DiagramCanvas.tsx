@@ -27,8 +27,15 @@ import type { NodePos, OverlayState, Selection } from './types';
 import { TableOverlay } from './overlay/TableOverlay';
 import { RouteHandles } from './overlay/RouteHandles';
 import { runLayout } from './layout/runLayout';
+import { clampPanAxis } from './clampPan';
 import { updateEdgeEndpoints } from './routing/updateEdgeEndpoints';
-import { dragSegment, segmentsFromPoints, type Pt } from './routing/channelRoute';
+import {
+  dragSegment,
+  segmentsFromPoints,
+  pointsToRoute,
+  routeToPoints,
+  type Pt,
+} from './routing/channelRoute';
 import { deriveFocusSelection, deriveSearchSelection } from './selection/deriveSelection';
 import { resolveDragGroup, toggleSelected } from './selection/dragGroup';
 import { normalizeRect, nodesInMarquee, type Rect } from './selection/marquee';
@@ -58,21 +65,36 @@ function applyEdgeTheme(cy: Core, isDark: boolean): void {
 /**
  * Snapshot the editable layout: MODEL-space card positions (n.position(), NOT
  * renderedBoundingBox — the latter is zoom/pan dependent and would restore
- * wrong) plus a clone of the current width overrides.
+ * wrong) plus a clone of the current width overrides. `manualMove` records the
+ * routing mode so undo can restore it (a pristine baseline re-routes statically,
+ * not via the live detour).
  */
-function captureSnapshot(cy: Core, widths: Record<string, number>): LayoutSnapshot {
+function capturePositions(cy: Core): Record<string, { x: number; y: number }> {
   const positions: Record<string, { x: number; y: number }> = {};
   cy.nodes('[type = "table"]').forEach((n) => {
     const p = n.position();
     positions[n.id()] = { x: p.x, y: p.y };
   });
-  return { positions, widths: { ...widths }, routes: { ...useApp.getState().manualRoutes } };
+  return positions;
+}
+
+function captureSnapshot(
+  cy: Core,
+  widths: Record<string, number>,
+  manualMove = false,
+): LayoutSnapshot {
+  return {
+    positions: capturePositions(cy),
+    widths: { ...widths },
+    routes: { ...useApp.getState().manualRoutes },
+    manualMove,
+  };
 }
 
 /** Write the current card positions into the store so a page refresh restores
  *  this arrangement (only the 重置布局 button / a new import re-layouts). */
 function persistLayout(cy: Core): void {
-  useApp.getState().setNodePositions(captureSnapshot(cy, {}).positions);
+  useApp.getState().setNodePositions(capturePositions(cy));
 }
 
 /**
@@ -95,30 +117,21 @@ function hideTables(cy: Core, ids: string[]): void {
   useApp.getState().deleteTables(ids);
 }
 
-/** Keep at least this many px of the diagram within the viewport when panning. */
-const PAN_MARGIN = 120;
-
 /**
  * Clamp a desired pan so the content's bounding box can never be dragged fully
  * off-screen — at least `PAN_MARGIN` px of it always stays in view. Without this
  * a single fast drag flings the whole diagram into the void ("content vanished,
- * can't find it"). Returns the pan unchanged when there are no elements.
+ * can't find it"). Returns the pan unchanged when there are no elements. The
+ * per-axis math lives in the pure, unit-tested `clampPanAxis`.
  */
 function clampPan(cy: Core, pan: { x: number; y: number }): { x: number; y: number } {
   const els = cy.elements();
   if (els.empty()) return pan;
   const bb = els.boundingBox();
   const z = cy.zoom();
-  // content rendered span on an axis = [c1*z + p, c2*z + p]; keep the far edge
-  // ≥ MARGIN inside one side and the near edge ≤ size − MARGIN from the other.
-  const clampAxis = (p: number, c1: number, c2: number, size: number) => {
-    const min = PAN_MARGIN - c2 * z;
-    const max = size - PAN_MARGIN - c1 * z;
-    return min > max ? p : Math.max(min, Math.min(max, p));
-  };
   return {
-    x: clampAxis(pan.x, bb.x1, bb.x2, cy.width()),
-    y: clampAxis(pan.y, bb.y1, bb.y2, cy.height()),
+    x: clampPanAxis(pan.x, bb.x1, bb.x2, cy.width(), z),
+    y: clampPanAxis(pan.y, bb.y1, bb.y2, cy.height(), z),
   };
 }
 
@@ -175,6 +188,10 @@ export function DiagramCanvas() {
   // Delayed-hide timer so moving the cursor from the thin edge onto a handle
   // dot doesn't drop the handles mid-reach.
   const hideHandlesTimer = useRef<number | null>(null);
+  // Teardown fns for in-flight window drag listeners (see beginDrag). Called by
+  // the mount-effect cleanup so a mid-drag unmount can't leak a listener or fire
+  // one against a destroyed cy.
+  const dragCleanups = useRef<Set<() => void>>(new Set());
 
   const tableById = useMemo(() => {
     const m = new Map<string, Table>();
@@ -209,7 +226,11 @@ export function DiagramCanvas() {
   // Publish the ordered list of search matches for find-style navigation. Sort
   // by on-canvas reading order (top→bottom, then left→right) so pressing Enter
   // walks the diagram naturally; the toolbar reads this list for its "n / m"
-  // counter. Resets the active cursor whenever the match set changes.
+  // counter. `positions` is a dependency (a re-run trigger, not read here) so
+  // the order is re-derived after a drag/layout — and once cy becomes ready on
+  // cold start, when the first run sorted nothing. setSearchMatches keeps the
+  // active cursor on the same node across a pure reorder, so re-publishing
+  // never disrupts an in-progress find.
   useEffect(() => {
     const matches = searchSelection?.matches;
     if (!matches || matches.size === 0) {
@@ -219,22 +240,36 @@ export function DiagramCanvas() {
     const ids = Array.from(matches);
     const cy = cyRef.current;
     if (cy) {
+      // Read each node's position ONCE into a map, then sort against it —
+      // cy.getElementById(...).position() inside the comparator would re-look-up
+      // O(n log n) times.
+      const pos = new Map(ids.map((id) => [id, cy.getElementById(id).position()]));
       ids.sort((a, b) => {
-        const pa = cy.getElementById(a).position();
-        const pb = cy.getElementById(b).position();
+        const pa = pos.get(a)!;
+        const pb = pos.get(b)!;
         return pa.y - pb.y || pa.x - pb.x;
       });
     }
     setSearchMatches(ids);
-  }, [searchSelection, setSearchMatches]);
+  }, [searchSelection, setSearchMatches, positions]);
 
   // Follow the active match: pan (keeping zoom) so it's centered. Only fires
   // once the user steps into the results (Enter / nav buttons → index ≥ 0), so
-  // the camera never jumps around while typing.
+  // the camera never jumps around while typing. The ref guard means a re-publish
+  // that merely reorders the list (e.g. dragging a matched card) keeps the
+  // cursor on the same node WITHOUT re-centering — only an actual change of the
+  // active match node pans the camera.
+  const lastCenteredMatchRef = useRef<string | null>(null);
   useEffect(() => {
-    if (searchActiveIndex < 0) return;
+    if (searchActiveIndex < 0) {
+      lastCenteredMatchRef.current = null;
+      return;
+    }
     const id = searchMatchIds[searchActiveIndex];
-    if (id) getView()?.centerOnNode(id);
+    if (id && id !== lastCenteredMatchRef.current) {
+      lastCenteredMatchRef.current = id;
+      getView()?.centerOnNode(id);
+    }
   }, [searchActiveIndex, searchMatchIds]);
 
   const activeMatchId = searchActiveIndex >= 0 ? (searchMatchIds[searchActiveIndex] ?? null) : null;
@@ -277,6 +312,11 @@ export function DiagramCanvas() {
   // A fresh mount (refresh / remount) re-arms it; mid-session rebuilds must not
   // snap the camera back.
   const viewportRestoredRef = useRef(false);
+  // Signature of the node set the undo history was last baselined against. The
+  // rebuild effect resets history only when this changes (a real structural
+  // change), so a visibility-only rebuild (FK accept/reject, showLowConfidence)
+  // preserves the user's card-move undo stack.
+  const historyNodeSetRef = useRef<string>('');
 
   // Mount cytoscape once.
   useEffect(() => {
@@ -350,7 +390,10 @@ export function DiagramCanvas() {
           if (p) n.position(p);
         });
       });
-      manualMoveRef.current = true;
+      // Restore the snapshot's routing mode so undoing back to a pristine
+      // baseline re-routes via the static dagre channels it was captured with,
+      // not the live detour. (`?? current` keeps the flag for pre-field snapshots.)
+      manualMoveRef.current = snap.manualMove ?? manualMoveRef.current;
       // Restore the hand-edited connector routes too, so undo/redo of a route
       // edit works. Pass snap.routes straight into the reroute (the ref mirror
       // won't reflect the store update synchronously within this closure).
@@ -388,7 +431,7 @@ export function DiagramCanvas() {
       runLayout(cy);
       persistLayout(cy); // 重置布局 saves the new auto-layout so refresh keeps it
       resetHistory();
-      seedHistory(captureSnapshot(cy, tableWidthsRef.current));
+      seedHistory(captureSnapshot(cy, tableWidthsRef.current, manualMoveRef.current));
     };
     bindView({
       cy,
@@ -463,7 +506,9 @@ export function DiagramCanvas() {
     cy.on('mouseover', 'edge', (evt) => {
       // Show route-edit handles for the hovered edge (never self-loops).
       if (evt.target.source().id() !== evt.target.target().id()) {
-        if (hideHandlesTimer.current) {
+        // Compare against null, not truthiness — a setTimeout id of 0 is falsy
+        // but a real timer, and skipping clearTimeout would drop handles mid-reach.
+        if (hideHandlesTimer.current !== null) {
           clearTimeout(hideHandlesTimer.current);
           hideHandlesTimer.current = null;
         }
@@ -486,7 +531,7 @@ export function DiagramCanvas() {
     });
     cy.on('mouseout', 'edge', () => {
       setTooltip(null);
-      if (hideHandlesTimer.current) clearTimeout(hideHandlesTimer.current);
+      if (hideHandlesTimer.current !== null) clearTimeout(hideHandlesTimer.current);
       hideHandlesTimer.current = window.setTimeout(() => {
         if (!draggingEdgeRef.current) setHoveredEdgeId(null);
       }, 160);
@@ -528,9 +573,19 @@ export function DiagramCanvas() {
     };
     wheelTarget.addEventListener('wheel', onWheel, { passive: false });
 
+    // Capture the (stable) teardown set so the cleanup doesn't read the ref in
+    // its own closure — the Set object never changes, only its members do.
+    const cleanups = dragCleanups.current;
     return () => {
+      // Tear down any in-flight drag's window listeners first, so a mid-drag
+      // unmount can't fire onMove against the destroyed cy (snapshot the set —
+      // each teardown deletes itself).
+      [...cleanups].forEach((fn) => fn());
       wheelTarget.removeEventListener('wheel', onWheel);
       if (saveTimer !== undefined) clearTimeout(saveTimer);
+      // Cancel a pending hide-handles timer too, so its setHoveredEdgeId(null)
+      // can't fire after the component is gone (and leak the timer).
+      if (hideHandlesTimer.current !== null) clearTimeout(hideHandlesTimer.current);
       cy.destroy();
       cyRef.current = null;
       unbindView(); // also clears + unbinds the history machinery
@@ -636,6 +691,11 @@ export function DiagramCanvas() {
       return live.size === prev.size ? prev : live;
     });
 
+    // Drop a stale focus too: if the focused table is gone after the rebuild,
+    // clear focusId so deriveFocusSelection doesn't dim the whole canvas around a
+    // dead node (matches = {deadId}, empty neighborhood → everything else dims).
+    setFocusId((cur) => (cur && cy.getElementById(cur).empty() ? null : cur));
+
     // Restore positions: an in-session position first, then the PERSISTED layout
     // (so a page refresh keeps the arrangement). Only auto-layout when no node
     // has any known position (true first load, or an all-new schema).
@@ -667,14 +727,16 @@ export function DiagramCanvas() {
     // refresh the saved viewport is non-null → reproduce the exact prior screen
     // (instant, no animation). On a fresh import `setSql` nulled it → skip and
     // keep the auto-fit. The guard flips regardless so later mid-session
-    // rebuilds never re-snap the camera. Set zoom before pan: clampPan reads
-    // cy.zoom(). The pan/zoom this fires re-persists the same value (idempotent).
+    // rebuilds never re-snap the camera. The saved pan is applied VERBATIM (no
+    // clampPan): it was a legal camera when saved, and clamping it here can
+    // shift it a few px off the saved view (defeating the "exact prior screen"
+    // guarantee). The pan/zoom this fires re-persists the same value (idempotent).
     if (!viewportRestoredRef.current) {
       viewportRestoredRef.current = true;
       const v = useApp.getState().viewport;
       if (v) {
         cy.zoom(v.zoom);
-        cy.pan(clampPan(cy, { x: v.x, y: v.y }));
+        cy.pan({ x: v.x, y: v.y });
       }
     }
     // After (re)building the elements, force a full endpoint refresh so the
@@ -698,10 +760,21 @@ export function DiagramCanvas() {
     useApp.getState().pruneManualRoutes(
       cy.edges().map((e) => e.data('fkKey') as string),
     );
-    // A rebuild changes the node set, so old undo snapshots may reference dead
-    // nodes — reset the history and re-baseline to the freshly built layout.
-    resetHistory();
-    seedHistory(captureSnapshot(cy, tableWidthsRef.current));
+    // Reset history only when the node SET actually changed. Undo snapshots
+    // reference node ids, so they stay valid across a visibility-only rebuild
+    // (FK accept/reject, showLowConfidence toggle) — the user keeps their
+    // card-move undo stack. A schema edit / table delete changes the set →
+    // reset + re-baseline to the freshly built layout.
+    const nodeSetKey = cy
+      .nodes()
+      .map((n) => n.id())
+      .sort()
+      .join('|');
+    if (nodeSetKey !== historyNodeSetRef.current) {
+      historyNodeSetRef.current = nodeSetKey;
+      resetHistory();
+      seedHistory(captureSnapshot(cy, tableWidthsRef.current, manualMoveRef.current));
+    }
     // NB: tableWidths intentionally not in deps — width drags are committed
     // via direct cy mutation in `onTableResize` to avoid a full element
     // rebuild (which would reset edge classes/positions). The next schema
@@ -768,12 +841,16 @@ export function DiagramCanvas() {
           e.addClass('dimmed');
         }
       });
-      if (matches.size > 0) {
+      // Center only for a click-FOCUS selection (jump to the clicked card +
+      // neighborhood). A SEARCH selection must NOT center here — that yanked the
+      // camera on every keystroke; find-navigation centers on the active match
+      // only after Enter (the follow effect above).
+      if (selection === focusSelection && matches.size > 0) {
         const matchNodes = cy.nodes().filter((n) => matches.has(n.id()));
         if (matchNodes.length > 0) cy.animate({ center: { eles: matchNodes }, duration: 200 });
       }
     }
-  }, [selection]);
+  }, [selection, focusSelection]);
 
   // Flash-highlight when the user clicks a module chip in ModulesPanel. Pans
   // the canvas to center the module's tables in the viewport, paints them
@@ -804,6 +881,29 @@ export function DiagramCanvas() {
     // flashTick guarantees re-running even when the table list is identical to
     // last time.
   }, [flashTables, flashTick, clearFlash]);
+
+  /**
+   * Attach window mousemove/mouseup listeners for a drag and register a teardown
+   * so an unmount mid-drag (e.g. the schema is cleared and App unmounts the
+   * canvas) removes them — otherwise the captured `cy` is used after cy.destroy()
+   * on the next mouse move, which throws and leaks the listener. The teardown
+   * runs on a normal mouseup too (wrapping the caller's onUp), so each drag
+   * registers and removes exactly once.
+   */
+  const beginDrag = (onMove: (e: MouseEvent) => void, onUp: () => void) => {
+    const teardown = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', wrappedUp);
+      dragCleanups.current.delete(teardown);
+    };
+    const wrappedUp = () => {
+      teardown();
+      onUp();
+    };
+    dragCleanups.current.add(teardown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', wrappedUp);
+  };
 
   /**
    * Begin a header drag. Three behaviors, decided on mouseup by whether the
@@ -853,8 +953,6 @@ export function DiagramCanvas() {
       });
     };
     const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
       if (!moved) {
         if (additive) {
           // Toggle group membership only; leave the focus highlight alone.
@@ -895,15 +993,14 @@ export function DiagramCanvas() {
       // Record this layout state for undo/redo + persist it so a refresh keeps
       // the arrangement (skip if we're mid-apply).
       if (!getIsApplying()) {
-        const snap = captureSnapshot(cy, tableWidthsRef.current);
+        const snap = captureSnapshot(cy, tableWidthsRef.current, manualMoveRef.current);
         pushHistory(snap);
         useApp.getState().setNodePositions(snap.positions);
       }
       // A plain drag of an unselected card shouldn't leave a stale group.
       if (!additive && !(sel.has(id) && sel.size > 1)) setSelectedIds(new Set([id]));
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    beginDrag(onMove, onUp);
     e.preventDefault();
     e.stopPropagation();
   };
@@ -946,8 +1043,6 @@ export function DiagramCanvas() {
       );
     };
     const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
       if (lastWidth !== startWidth) {
         setTableWidth(tableName, lastWidth);
         // Record for undo. Build widths from a CLONE of the current overrides
@@ -959,12 +1054,11 @@ export function DiagramCanvas() {
           const fkKeys = node.connectedEdges().map((ed) => ed.data('fkKey') as string);
           if (fkKeys.length) useApp.getState().clearManualRoutesForNode(fkKeys);
           const widths = { ...tableWidthsRef.current, [tableName]: lastWidth };
-          pushHistory(captureSnapshot(cy, widths));
+          pushHistory(captureSnapshot(cy, widths, manualMoveRef.current));
         }
       }
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    beginDrag(onMove, onUp);
     e.preventDefault();
     e.stopPropagation();
   };
@@ -1000,12 +1094,9 @@ export function DiagramCanvas() {
         );
       };
       const onUp = () => {
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
         setPanning(false);
       };
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
+      beginDrag(onMove, onUp);
       e.preventDefault();
       return;
     }
@@ -1042,17 +1133,14 @@ export function DiagramCanvas() {
       setSelectedIds(next);
     };
     const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
       setMarquee(null);
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    beginDrag(onMove, onUp);
     e.preventDefault(); // suppress native text selection across the drag
   };
 
   const cancelHideHandles = () => {
-    if (hideHandlesTimer.current) {
+    if (hideHandlesTimer.current !== null) {
       clearTimeout(hideHandlesTimer.current);
       hideHandlesTimer.current = null;
     }
@@ -1075,13 +1163,7 @@ export function DiagramCanvas() {
     if (!cy) return;
     const edge = cy.getElementById(edgeId);
     if (!edge || edge.empty()) return;
-    const startPoly: Pt[] = (edge.data('routePoints') as string)
-      .split(' ')
-      .filter(Boolean)
-      .map((s) => {
-        const [x, y] = s.split(',').map(Number);
-        return { x, y };
-      });
+    const startPoly: Pt[] = routeToPoints(edge.data('routePoints') as string);
     const startMouse = { x: ev.clientX, y: ev.clientY };
     draggingEdgeRef.current = true;
     cancelHideHandles();
@@ -1093,28 +1175,31 @@ export function DiagramCanvas() {
       const dModel = { x: (mv.clientX - startMouse.x) / zoom, y: (mv.clientY - startMouse.y) / zoom };
       if (!moved && Math.abs(dModel.x) + Math.abs(dModel.y) > 1) moved = true;
       if (!moved) return;
-      lastRoute = dragSegment(startPoly, segIndex, dModel);
+      const next = dragSegment(startPoly, segIndex, dModel);
+      // Skip a degenerate (non-finite) frame entirely: don't update lastRoute or
+      // write it to the edge. Otherwise the bad route would be drawn live while
+      // setManualRoute rejects it on mouseup, leaving the on-screen and persisted
+      // routes divergent. lastRoute therefore always holds the last good route.
+      if (!next.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) return;
+      lastRoute = next;
       // Write live: ports (srcEndpoint/tgtEndpoint) are unchanged; just re-encode
       // the bends + routePoints so the canvas updates while dragging.
       const { weights, distances } = segmentsFromPoints(lastRoute);
       edge.data('segWeights', weights);
       edge.data('segDistances', distances);
-      edge.data('routePoints', lastRoute.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '));
+      edge.data('routePoints', pointsToRoute(lastRoute));
       bumpRouteTick((t) => t + 1); // re-render the handle to follow the segment
     };
     const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
       draggingEdgeRef.current = false;
       if (moved) {
         manualMoveRef.current = true;
         useApp.getState().setManualRoute(edge.data('fkKey') as string, lastRoute);
-        if (!getIsApplying()) pushHistory(captureSnapshot(cy, tableWidthsRef.current));
+        if (!getIsApplying()) pushHistory(captureSnapshot(cy, tableWidthsRef.current, manualMoveRef.current));
       }
       scheduleHideHandles();
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    beginDrag(onMove, onUp);
     ev.preventDefault();
     ev.stopPropagation();
   };
@@ -1174,13 +1259,7 @@ export function DiagramCanvas() {
           const cy = cyRef.current;
           const e = cy.getElementById(hoveredEdgeId);
           if (!e || e.empty()) return null;
-          const rp: Pt[] = ((e.data('routePoints') as string) || '')
-            .split(' ')
-            .filter(Boolean)
-            .map((s) => {
-              const [x, y] = s.split(',').map(Number);
-              return { x, y };
-            });
+          const rp: Pt[] = routeToPoints(e.data('routePoints') as string);
           if (rp.length < 4) return null; // need an interior segment to drag
           return (
             <RouteHandles
