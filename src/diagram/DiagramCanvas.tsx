@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import cytoscape, { type Core } from 'cytoscape';
+import cytoscape, { type Core, type EdgeCollection } from 'cytoscape';
 import {
   buildElements,
   buildFkSourceColumns,
@@ -154,7 +154,9 @@ export function DiagramCanvas() {
   const setTableWidth = useApp((s) => s.setTableWidth);
   const canvasMode = useApp((s) => s.canvasMode);
   const deletedTables = useApp((s) => s.deletedTables);
-  const manualRoutes = useApp((s) => s.manualRoutes);
+  // NB: `manualRoutes` is intentionally NOT subscribed here — nothing in render
+  // reads it; the cy event handlers read it fresh via `useApp.getState()` at
+  // call time. Subscribing would force a full re-render on every route edit.
   const setSearchMatches = useApp((s) => s.setSearchMatches);
   const searchMatchIds = useApp((s) => s.searchMatchIds);
   const searchActiveIndex = useApp((s) => s.searchActiveIndex);
@@ -306,8 +308,6 @@ export function DiagramCanvas() {
   selectedIdsRef.current = selectedIds;
   const tableWidthsRef = useRef(tableWidths);
   tableWidthsRef.current = tableWidths;
-  const manualRoutesRef = useRef(manualRoutes);
-  manualRoutesRef.current = manualRoutes;
   // Whether the persisted camera has already been applied for THIS cy instance.
   // A fresh mount (refresh / remount) re-arms it; mid-session rebuilds must not
   // snap the camera back.
@@ -470,27 +470,48 @@ export function DiagramCanvas() {
       });
       setPositions(pos);
     };
+    // Infrequent events sync synchronously (immediate, responsive): pan/zoom
+    // (overlays must track the camera with no lag), container resize, fresh
+    // layout, and element add/remove.
     cy.on('pan zoom resize', syncPositions);
-    cy.on('position', 'node', syncPositions);
     cy.on('layoutstop', syncPositions);
     cy.on('add remove', syncPositions);
     // Persist the camera on any pan/zoom (not resize — a container resize must
     // not rewrite the stored camera).
     cy.on('pan zoom', saveViewport);
 
-    // Re-route per-field edge endpoints whenever a node moves (drag, layout,
-    // etc). Only the edges incident to the moved node need recomputing.
+    // Node `position` events are the HOT path: a group drag of k cards fires k
+    // events per frame (cy.batch defers only renderer notifications, not these
+    // user events). Coalesce them to one rAF flush per frame — one overlay-array
+    // rebuild + one reroute over the union of incident edges (which builds the
+    // obstacle map once), instead of k of each.
+    let posRafId: number | undefined;
+    let pendingEdges: EdgeCollection | null = null;
+    const flushDrag = () => {
+      posRafId = undefined;
+      if (cy.destroyed()) return;
+      syncPositions();
+      if (pendingEdges && pendingEdges.length > 0) {
+        updateEdgeEndpoints(
+          cy,
+          pendingEdges,
+          collapsedRef.current,
+          tableByIdRef.current,
+          displayRef.current,
+          manualMoveRef.current,
+          useApp.getState().manualRoutes,
+        );
+      }
+      pendingEdges = null;
+    };
     cy.on('position', 'node', (evt) => {
-      updateEdgeEndpoints(
-        cy,
-        evt.target.connectedEdges(),
-        collapsedRef.current,
-        tableByIdRef.current,
-        displayRef.current,
-        manualMoveRef.current,
-        manualRoutesRef.current,
-      );
+      const inc = evt.target.connectedEdges();
+      pendingEdges = pendingEdges ? pendingEdges.union(inc) : inc;
+      if (posRafId === undefined) posRafId = requestAnimationFrame(flushDrag);
     });
+    // Fresh layout / nodes added: reroute every edge once (synchronous — these
+    // are one-shot, infrequent events, and deferring would flash stale routes
+    // for a frame after 重置布局).
     cy.on('layoutstop add', () => {
       updateEdgeEndpoints(
         cy,
@@ -499,7 +520,7 @@ export function DiagramCanvas() {
         tableByIdRef.current,
         displayRef.current,
         manualMoveRef.current,
-        manualRoutesRef.current,
+        useApp.getState().manualRoutes,
       );
     });
 
@@ -581,6 +602,8 @@ export function DiagramCanvas() {
       // unmount can't fire onMove against the destroyed cy (snapshot the set —
       // each teardown deletes itself).
       [...cleanups].forEach((fn) => fn());
+      // Cancel a pending drag-flush rAF so it can't fire against the destroyed cy.
+      if (posRafId !== undefined) cancelAnimationFrame(posRafId);
       wheelTarget.removeEventListener('wheel', onWheel);
       if (saveTimer !== undefined) clearTimeout(saveTimer);
       // Cancel a pending hide-handles timer too, so its setHoveredEdgeId(null)
@@ -749,7 +772,7 @@ export function DiagramCanvas() {
       tableByIdRef.current,
       displayRef.current,
       manualMoveRef.current,
-      manualRoutesRef.current,
+      useApp.getState().manualRoutes,
     );
     // Color the freshly-built edges for the current theme (no flash of the
     // light/invisible color before the theme effect below would run).
@@ -816,7 +839,7 @@ export function DiagramCanvas() {
       tableByIdRef.current,
       display,
       manualMoveRef.current,
-      manualRoutesRef.current,
+      useApp.getState().manualRoutes,
     );
     // Force overlay re-sync after data mutation.
     cy.trigger('resize');
@@ -1039,7 +1062,7 @@ export function DiagramCanvas() {
         tableByIdRef.current,
         displayRef.current,
         manualMoveRef.current,
-        manualRoutesRef.current,
+        useApp.getState().manualRoutes,
       );
     };
     const onUp = () => {
