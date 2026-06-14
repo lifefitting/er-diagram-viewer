@@ -8,9 +8,9 @@ cleanups**, and **P2 #5 (persist hardening)** are fixed and verified (typecheck
 + lint + 174 tests + build green; each batch passed an adversarial verify pass).
 Shipped as **v0.2.1**. **P2 #3 (drag-path perf coalescing)** is now also fixed +
 verified (single + group drag re-routed via one rAF flush/frame; preview +
-Playwright drag, 0 console errors). What remains: **3 P2 altitude** items
-(routing — need running-the-app verification) and **7 P3** items deferred with
-rationale below.
+Playwright drag, 0 console errors). The **manual-route dock-side flip** is now
+fixed too (see Done log). What remains: **2 P2 altitude** items (routing — need
+running-the-app verification) and **7 P3** items deferred with rationale below.
 
 > Line numbers are from the pre-fix review and have drifted in `DiagramCanvas.tsx`
 > (fixes added code); each item names its function/symbol so it stays findable.
@@ -27,12 +27,9 @@ rationale below.
   Tight side-by-side cards (small positive `gapX`) with a large vertical port offset fall to dagre/detour instead of the cleaner bracket — purely because `buildObstacles` can't include the endpoint card body for a crossing test, so the gap-sign gate is a call-site workaround.
   **Fix:** let `buildObstacles` optionally include an endpoint card's body (minus its port row); one bracket routine then serves stacked *and* tight side-by-side cases.
 
-- [ ] **Manual-route dock side re-derived heuristically, can flip mid-move** — `updateEdgeEndpoints.ts` — *PLAUSIBLE*
-  The override branch recomputes the port dock side from the stored route's first point vs the live card center on every redock. Dragging a card whose center crosses `override[0].x` flips left/right and snaps the hand-tuned path across the card mid-drag (transient; resize does *not* trigger it).
-  **Fix:** persist the dock side in the `manualRoutes` entry instead of re-deriving from stale coords.
-
 _(#3 syncPositions drag coalescing — **DONE**; see Done log. #5 persist
-migrate/validation — **DONE** in v0.2.1; see Done log.)_
+migrate/validation — **DONE** in v0.2.1; see Done log. Manual-route dock-side
+flip — **DONE**; see Done log.)_
 
 ---
 
@@ -107,6 +104,20 @@ pan/zoom/layoutstop/add-remove kept synchronous (no relayout flash / pan lag).
 Verified: typecheck + lint + 174 tests + build green, plus preview + Playwright
 single- and group-drag (rigid move, edges re-dock to field ports, 0 console
 errors).
+
+**P2 altitude (×1, post-v0.2.1)** — manual-route dock-side flip: the live
+per-frame reroute (`flushDrag`) now ignores manual overrides while a card drag is
+active (`nodeDraggingRef` in `DiagramCanvas.tsx`), so a hand-edited route can no
+longer re-dock and flip its port side as the card center crosses the stored
+`override[0].x` mid-drag. On release the existing clear + re-route runs unchanged.
+Lightweight — no persisted-shape change, no `PERSIST_VERSION` bump — chosen over
+persisting `srcSide`/`tgtSide` (which would have needed a version bump +
+`persistMigrate` extension for cases the symptom never reached: resize/reload
+don't trigger the flip). Verified: typecheck + lint + 174 tests + build green,
+plus a preview + Playwright card-drag smoke (card moves across its original
+port-x, 0 console errors). The flip repro itself isn't drivable via Playwright —
+cy canvas hit-testing ignores synthetic mouse events, so an edge-handle drag (to
+create a manual route) can't be simulated.
 
 **Tests added:** `buildGraph.test.ts`, `searchMatches.test.ts`,
 `canvasSlice.test.ts`, `clampPan.test.ts`, `persistMigrate.test.ts`

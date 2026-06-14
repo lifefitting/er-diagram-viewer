@@ -187,6 +187,11 @@ export function DiagramCanvas() {
   // Bumped during a segment drag to re-render the handles from the live route.
   const [, bumpRouteTick] = useState(0);
   const draggingEdgeRef = useRef(false);
+  // True only while a user header-drag is actively moving cards. The live
+  // per-frame reroute (flushDrag) skips manual overrides while this is set so a
+  // hand-edited route can't re-dock (and flip its port side) under the moving
+  // card. Programmatic moves (undo / relayout / restore) leave it false.
+  const nodeDraggingRef = useRef(false);
   // Delayed-hide timer so moving the cursor from the thin edge onto a handle
   // dot doesn't drop the handles mid-reach.
   const hideHandlesTimer = useRef<number | null>(null);
@@ -499,7 +504,11 @@ export function DiagramCanvas() {
           tableByIdRef.current,
           displayRef.current,
           manualMoveRef.current,
-          useApp.getState().manualRoutes,
+          // During a user card drag, ignore overrides so the dragged card's edges
+          // follow a fresh auto-route instead of re-docking a stale hand-tuned
+          // path (whose port side would flip as the card center crosses the old
+          // port-x). Cleared on mouseup, which then clears the moved overrides.
+          nodeDraggingRef.current ? {} : useApp.getState().manualRoutes,
         );
       }
       pendingEdges = null;
@@ -967,6 +976,8 @@ export function DiagramCanvas() {
         // First real movement → route edges live (detour from current ports)
         // for the rest of this session, until a relayout re-canonicalises.
         manualMoveRef.current = true;
+        // Suppress override re-dock for the duration of this drag (see ref decl).
+        nodeDraggingRef.current = true;
       }
       if (!moved) return;
       // One batch so the per-node reroute handler coalesces into a bounded
@@ -976,6 +987,7 @@ export function DiagramCanvas() {
       });
     };
     const onUp = () => {
+      nodeDraggingRef.current = false;
       if (!moved) {
         if (additive) {
           // Toggle group membership only; leave the focus highlight alone.
