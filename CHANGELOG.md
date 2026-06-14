@@ -5,10 +5,16 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **手改连线不再随拖卡翻转**：拖动卡片期间，实时逐帧重路由（`flushDrag`）忽略手动
+  override，手改的连线不会因卡片中心越过原端口 x 而左右「啪」地跨过卡片
+  （`DiagramCanvas.tsx` 新增 `nodeDraggingRef`）。轻量实现，不改持久化结构、不升版本。
+
 ### 计划中（altitude，P2）
 
-- 布线引擎统一（始终走 `detourRoute`、退役 dagre 通道航点）、side-bracket 泛化、
-  `syncPositions` 热路径按帧合并、手改连线 dock 侧持久化。详见 `TODO-fix-bugs.md`。
+- 布线引擎统一（始终走 `detourRoute`、退役 dagre 通道航点）、side-bracket 泛化。
+  详见 `TODO-fix-bugs.md`。
 
 ## [0.2.1] — 2026-06-01
 
