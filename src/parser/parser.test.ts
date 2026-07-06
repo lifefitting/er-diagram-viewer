@@ -25,13 +25,14 @@ describe('parseSql / CREATE TABLE', () => {
 
   it('handles inline PRIMARY KEY and inline REFERENCES', () => {
     const sql = `
+      CREATE TABLE users (id INT PRIMARY KEY);
       CREATE TABLE orders (
         id INT PRIMARY KEY,
         user_id INT REFERENCES users(id)
       );
     `;
     const schema = parseSql(sql);
-    const t = schema.tables[0];
+    const t = schema.tables[1];
     expect(t.primaryKey).toEqual(['id']);
     expect(schema.explicitForeignKeys).toEqual([
       expect.objectContaining({
@@ -46,6 +47,8 @@ describe('parseSql / CREATE TABLE', () => {
 
   it('captures table-level FOREIGN KEY constraints', () => {
     const sql = `
+      CREATE TABLE orders (id INT PRIMARY KEY);
+      CREATE TABLE products (id INT PRIMARY KEY);
       CREATE TABLE order_items (
         id INT PRIMARY KEY,
         order_id INT,
@@ -102,5 +105,34 @@ describe('parseSql / CREATE TABLE', () => {
     ]);
     const userCol = t.columns.find((c) => c.name === 'user_id');
     expect(userCol?.hasIndex).toBe(true);
+  });
+
+  it('drops FKs referencing tables not defined in the script, with a warning', () => {
+    const sql = `
+      CREATE TABLE orders (
+        id INT PRIMARY KEY,
+        user_id INT REFERENCES users(id)
+      );
+      ALTER TABLE orders ADD CONSTRAINT fk_o_w FOREIGN KEY (warehouse_id) REFERENCES warehouses(id);
+    `;
+    const schema = parseSql(sql);
+    expect(schema.tables).toHaveLength(1);
+    expect(schema.explicitForeignKeys).toEqual([]);
+    const danglingWarnings = schema.warnings.filter((w) => w.message.includes('not defined'));
+    expect(danglingWarnings).toHaveLength(2);
+    expect(danglingWarnings[0].snippet).toContain('users');
+  });
+
+  it('keeps FKs whose endpoint tables differ only in case', () => {
+    const sql = `
+      CREATE TABLE Users (id INT PRIMARY KEY);
+      CREATE TABLE orders (
+        id INT PRIMARY KEY,
+        user_id INT,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+    `;
+    const schema = parseSql(sql);
+    expect(schema.explicitForeignKeys).toHaveLength(1);
   });
 });

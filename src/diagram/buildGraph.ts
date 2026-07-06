@@ -334,7 +334,14 @@ export function buildElements(
     fkKeyCounts.set(k, (fkKeyCounts.get(k) ?? 0) + 1);
   }
 
+  // Node ids actually built above. An edge referencing a node outside this
+  // set would make `cy.add` throw and unmount the canvas — the parser filters
+  // dangling FKs upstream; this is the last line of defense (compare by
+  // nodeId, which lowercases, so case-variant FK table names still connect).
+  const builtNodeIds = new Set(schema.tables.map((t) => nodeId(t.name)));
+
   for (const [i, fk] of fks.entries()) {
+    if (!builtNodeIds.has(nodeId(fk.fromTable)) || !builtNodeIds.has(nodeId(fk.toTable))) continue;
     const fromMod = modules.byTable.get(fk.fromTable);
     const toMod = modules.byTable.get(fk.toTable);
     const sameModule = !!fromMod && fromMod === toMod;

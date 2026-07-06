@@ -47,12 +47,14 @@ export interface ShardGroup {
   key: string;
   /** Base prefix in original casing (taken from the representative). */
   base: string;
-  /** Display name on the canvas: `${base}_*`. */
+  /** Display name on the canvas: the base table's name, or `${base}_*` without one. */
   displayName: string;
-  /** Physical shard table names (sorted). */
+  /** Physical shard table names (sorted; excludes the absorbed base table). */
   shards: string[];
   /** The table picked as the canonical representative. */
   representative: Table;
+  /** Set when a suffix-less base table was absorbed into this group. */
+  baseTableName?: string;
 }
 
 export interface MergeShardsResult {
@@ -79,55 +81,98 @@ export interface MergeShardsResult {
  * (intra-shard FKs collapsing to rep→rep) are dropped. The resulting FK list
  * is deduped on `(from.cols → to.cols)`.
  *
- * Single-shard "groups" (a base with only one matching table) are left
- * untouched — a lone `orders_2024` table is NOT renamed to `orders_*`.
+ * Base-table absorption: a suffix-less table named exactly like a group's base
+ * (`orders` next to `orders_202401…`) is the same logical table — the PG
+ * partitioned parent, or a MySQL hot table with archive shards. It is absorbed
+ * into the group when its column names are compatible with the widest shard,
+ * and the merged node keeps the base table's REAL name (`orders`, not
+ * `orders_*`). With a compatible base present, even a single shard merges.
+ * An incompatible same-named table stays separate, with a neutral notice.
+ *
+ * Single-shard "groups" without a base table are left untouched — a lone
+ * `orders_2024` table is NOT renamed to `orders_*`.
  */
 export function mergeShardedTables(schema: Schema): MergeShardsResult {
-  // Bucket every shard-suffixed table by its lower-cased base.
+  // Bucket every shard-suffixed table by its lower-cased base; keep the
+  // suffix-less tables in a side lookup for base-table absorption.
   const buckets = new Map<string, Table[]>();
+  const baseTables = new Map<string, Table>();
   for (const t of schema.tables) {
     const base = extractShardBase(t.name);
-    if (!base) continue;
+    if (!base) {
+      baseTables.set(t.name.toLowerCase(), t);
+      continue;
+    }
     const key = base.toLowerCase();
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key)!.push(t);
   }
 
   const groups: ShardGroup[] = [];
-  const dropped = new Set<string>(); // shard table names to remove from the schema
+  // Tracked by object identity, NOT by name: the representative may take over
+  // the absorbed base table's name, so a name-keyed set would drop both.
+  const dropped = new Set<Table>();
   const rename = new Map<string, string>(); // shard name -> displayName
+  const skippedBaseNotices: string[] = [];
 
   for (const [key, members] of buckets) {
-    if (members.length < 2) continue;
+    const baseTable = baseTables.get(key);
+    const widest = members.reduce((w, t) => (t.columns.length > w.columns.length ? t : w));
+    const absorbedBase = baseTable && columnsCompatible(baseTable, widest) ? baseTable : undefined;
+    if (baseTable && !absorbedBase) {
+      skippedBaseNotices.push(
+        `表 ${baseTable.name} 与同名分表列结构不一致，未合并（分表：${members
+          .map((t) => t.name)
+          .sort()
+          .join('、')}）`,
+      );
+    }
+    if (!absorbedBase && members.length < 2) continue;
 
-    const sorted = [...members].sort((a, b) => {
+    const allMembers = absorbedBase ? [...members, absorbedBase] : members;
+    const sorted = [...allMembers].sort((a, b) => {
       if (b.columns.length !== a.columns.length) return b.columns.length - a.columns.length;
       return a.name.localeCompare(b.name);
     });
     const rep = sorted[0];
-    const base = extractShardBase(rep.name)!;
-    const displayName = `${base}_*`;
+    const base = absorbedBase ? absorbedBase.name : extractShardBase(rep.name)!;
+    const displayName = absorbedBase ? absorbedBase.name : `${base}_*`;
     const shards = members.map((t) => t.name).sort();
 
     // Build the rename map BEFORE mutating rep.name, otherwise the rep's original
     // shard name (e.g. account_detail_202401) would be lost and its outbound FKs
-    // wouldn't be rewritten to the representative.
+    // wouldn't be rewritten to the representative. The base table needs no rename
+    // entry — the merged node keeps its exact name.
     for (const t of members) {
       rename.set(t.name, displayName);
-      if (t !== rep) dropped.add(t.name);
+    }
+    for (const t of allMembers) {
+      if (t !== rep) dropped.add(t);
     }
 
     rep.name = displayName;
     rep.shardInfo = { base, shards };
 
-    groups.push({ key, base, displayName, shards, representative: rep });
+    groups.push({
+      key,
+      base,
+      displayName,
+      shards,
+      representative: rep,
+      baseTableName: absorbedBase?.name,
+    });
   }
 
   if (groups.length === 0) {
-    return { schema, notices: [], groups: [] };
+    if (skippedBaseNotices.length === 0) return { schema, notices: [], groups: [] };
+    return {
+      schema: { ...schema, notices: [...(schema.notices ?? []), ...skippedBaseNotices] },
+      notices: skippedBaseNotices,
+      groups: [],
+    };
   }
 
-  const newTables = schema.tables.filter((t) => !dropped.has(t.name));
+  const newTables = schema.tables.filter((t) => !dropped.has(t));
 
   const newFks: ForeignKey[] = [];
   const seen = new Set<string>();
@@ -142,19 +187,47 @@ export function mergeShardedTables(schema: Schema): MergeShardsResult {
     newFks.push(newFk);
   }
 
-  const totalMerged = groups.reduce((acc, g) => acc + g.shards.length, 0);
+  const totalMerged = groups.reduce(
+    (acc, g) => acc + g.shards.length + (g.baseTableName ? 1 : 0),
+    0,
+  );
   const summary =
     `合并了 ${groups.length} 组分表（共 ${totalMerged} 张物理表归并为 ${groups.length} 个代表节点）：` +
-    groups.map((g) => `${g.displayName}（${g.shards.length} 张）`).join('、');
+    groups
+      .map((g) =>
+        g.baseTableName
+          ? `${g.displayName}（基表 + ${g.shards.length} 张分表）`
+          : `${g.displayName}（${g.shards.length} 张）`,
+      )
+      .join('、');
+  const notices = [...skippedBaseNotices, summary];
 
   return {
     schema: {
       tables: newTables,
       explicitForeignKeys: newFks,
       warnings: schema.warnings,
-      notices: [...(schema.notices ?? []), summary],
+      notices: [...(schema.notices ?? []), ...notices],
     },
-    notices: [summary],
+    notices,
     groups,
   };
+}
+
+/**
+ * Column compatibility for base-table absorption: the lower-cased column-name
+ * sets must be equal, or one a subset of the other (a partition may trail the
+ * parent's latest ALTER, or vice versa). Types are deliberately ignored —
+ * consistent with the shard grouping itself, which never compares structure —
+ * but a disjoint/overlapping name set means "same-named yet different table",
+ * so it stays separate.
+ */
+function columnsCompatible(a: Table, b: Table): boolean {
+  const an = new Set(a.columns.map((c) => c.name.toLowerCase()));
+  const bn = new Set(b.columns.map((c) => c.name.toLowerCase()));
+  const [small, large] = an.size <= bn.size ? [an, bn] : [bn, an];
+  for (const name of small) {
+    if (!large.has(name)) return false;
+  }
+  return true;
 }

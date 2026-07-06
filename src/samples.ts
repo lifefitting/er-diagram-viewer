@@ -127,8 +127,18 @@ CREATE TABLE crm_tickets (
   KEY idx_order (order_id)
 ) COMMENT='Customer-support tickets';
 
--- Sharded by month. Pipeline should detect the _YYYYMM suffix and collapse
--- all four into a single account_detail_* representative node.
+-- Sharded by month, WITH a suffix-less base table (the PG-parent / MySQL
+-- hot-table pattern). Pipeline should detect the _YYYYMM suffix, absorb the
+-- base, and collapse all five into a single node named account_detail.
+CREATE TABLE account_detail (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  user_id BIGINT NOT NULL COMMENT 'Account owner',
+  balance_cents BIGINT NOT NULL DEFAULT 0,
+  recorded_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_user (user_id)
+) COMMENT='Monthly account balance snapshots';
+
 CREATE TABLE account_detail_202401 (
   id BIGINT NOT NULL AUTO_INCREMENT,
   user_id BIGINT NOT NULL COMMENT 'Account owner',
