@@ -25,11 +25,11 @@
 - **零后端纯前端**：单页应用，构建产物可静态托管或离线打开；导入的 SQL 不出本地
 - **轻量 SQL 解析**：手写词法器，覆盖 MySQL / PostgreSQL / SQLite 的 DDL 公共子集；不支持的语句会显式产出 warning，不再静默丢失
 - **隐式 FK 推断**：命名后缀（`_id` / `Id` 及 `_ref` / `Ref`）+ 类型一致 + 索引优先 + 同命名空间前缀匹配（`credential_ref` → `iam_credential`）+ 复合前缀兜底，分高 / 中 / 低三档置信度，每条都附"推断理由"
-- **分片表自动合并**：识别 `orders_0..orders_31` 这类按尾号水平分片的同构表，合并为单一逻辑表，避免推断阶段产生分片之间的噪声边
+- **分片表自动合并**：识别 `orders_0..orders_31` 这类按尾号水平分片的同构表，合并为单一逻辑表，避免推断阶段产生分片之间的噪声边；若同时存在同名同构基表（如 `orders` + `orders_202401…` 的分区表形态），基表一并吸收，节点保留基表原名
 - **模块自动着色**：按 FK 邻接 + 表名前缀聚类业务模块，四套调色板（鲜艳 / 粉彩 / 大地 / 单色）可切换
 - **出版级自动布局**：基于 dagre 的语义化「从左到右分层布局」，预留分层间隙作为布线通道，让外键尽量笔直、尽量不交叉；节点用 React HTML 覆盖层渲染（表名、注释副标题、PK / Unique / Index / FK 徽标、列类型）
 - **可编辑画布**：框选多选 + 成组拖动、手型平移模式（`Space` 拖拽 / 中键）、分级缩放（0.25→4 档位吸附）、撤销 / 重做（位置 / 宽度 / 连线，`⌘Z`），手工布局跨刷新自动保存
-- **连线可微调**：外键连线走正交折线、自动绕开表体；可拖拽线段中点手动微调走线，手改后持久保存
+- **连线可微调**：外键连线走正交折线、自动绕开表体，穿同一间隙的多条连线自动分道（各占一条车道、不叠成一条线）；可拖拽线段中点手动微调走线，手改后持久保存
 - **表卡片精细控制**：单击折叠到仅 PK 行、右侧把手手动调宽、双击宽度把手还原自动测算
 - **隐藏 / 回收站**：`Delete` 把表移出视图（不改 SQL），左下角回收站逐个或一键还原；导出同步排除
 - **三态搜索 + 命中高亮 + 匹配导航**：命中（amber ring）/ FK 邻居（正常）/ 其余（淡化），同时匹配表名、列名、表注释、列注释，并像 Chrome 查找一样给命中文本加黄色底色；搜索框旁显示「当前/总数」，`回车` / `Shift+回车` 在匹配间前后跳转，画布平移跟随当前命中
@@ -226,7 +226,7 @@ bunx vitest run -t "matches user_id"
 bun run test
 ```
 
-当前 **13 个测试文件、121 个用例**，覆盖纯逻辑层（解析 / 推断 / 布线 / 布局 / 选择）：
+当前 **24 个测试文件、204 个用例**，覆盖纯逻辑层（解析 / 推断 / 布线 / 布局 / 选择）：
 
 | 模块 | 覆盖点 |
 |---|---|
@@ -237,8 +237,11 @@ bun run test
 | `infer/inferModules.test.ts` | 模块聚类与调色板分配 |
 | `infer/mergeShardedTables.test.ts` | 分片识别（数字尾号 / 哈希 / hex） + FK 重写 |
 | `diagram/routing/channelRoute.test.ts` | 正交布线：直连 / 绕行 / 侧向括号 / 线段编码 |
+| `diagram/routing/assignTracks.test.ts` | 连线分道：重合聚簇、内部段分车道、越表回退、批外边不动 |
+| `diagram/routing/routeMetrics.test.ts` | 布线质量度量：交叉数 / 重合数 |
+| `diagram/routing/updateEdgeEndpoints.test.ts` | 端点入坞 + 分道后布线的交叉/重合护栏 |
 | `diagram/routing/computeEndpointOffset.test.ts` | 端点坐标计算 |
-| `diagram/layout/arrangeForPublication.test.ts` | dagre 分层、边方向归一、孤立表网格 |
+| `diagram/layout/arrangeForPublication.test.ts` | dagre 分层、边方向归一、孤立表不入 dagre、网格排布 |
 | `diagram/selection/closedNeighborhood.test.ts` | FK 闭邻域 |
 | `diagram/selection/marquee.test.ts` | 框选命中判定与修饰键求并 |
 | `diagram/selection/dragGroup.test.ts` | 成组拖动的成员解析 |

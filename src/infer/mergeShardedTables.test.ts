@@ -165,3 +165,98 @@ describe('mergeShardedTables', () => {
     expect(JSON.stringify(result.schema)).toBe(before);
   });
 });
+
+describe('mergeShardedTables / base-table absorption', () => {
+  it('absorbs a compatible suffix-less base table; the node keeps the base name', () => {
+    const sql = `
+      CREATE TABLE orders (id BIGINT PRIMARY KEY, total INT);
+      CREATE TABLE orders_202401 (id BIGINT PRIMARY KEY, total INT);
+      CREATE TABLE orders_202402 (id BIGINT PRIMARY KEY, total INT);
+      CREATE TABLE orders_202403 (id BIGINT PRIMARY KEY, total INT);
+    `;
+    const result = mergeShardedTables(parseSql(sql));
+    expect(result.groups).toHaveLength(1);
+    expect(result.schema.tables.map((t) => t.name)).toEqual(['orders']);
+    const rep = result.schema.tables[0];
+    expect(rep.shardInfo?.base).toBe('orders');
+    expect(rep.shardInfo?.shards).toEqual(['orders_202401', 'orders_202402', 'orders_202403']);
+    expect(result.groups[0].baseTableName).toBe('orders');
+    expect(result.notices.join('')).toContain('基表 + 3 张分表');
+  });
+
+  it('rewrites FKs pointing at a shard to the base name and drops base↔shard self-loops', () => {
+    const sql = `
+      CREATE TABLE orders (id BIGINT PRIMARY KEY);
+      CREATE TABLE orders_202401 (id BIGINT PRIMARY KEY, parent_id BIGINT,
+        CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES orders(id));
+      CREATE TABLE payments (id BIGINT PRIMARY KEY, order_id BIGINT,
+        CONSTRAINT fk_o FOREIGN KEY (order_id) REFERENCES orders_202401(id));
+    `;
+    const result = mergeShardedTables(parseSql(sql));
+    expect(result.schema.tables.map((t) => t.name).sort()).toEqual(['orders', 'payments']);
+    const fks = result.schema.explicitForeignKeys;
+    // The partition→parent FK collapses to a self-loop and is dropped; the
+    // external FK that targeted a physical shard now lands on `orders`.
+    expect(fks).toHaveLength(1);
+    expect(fks[0].fromTable).toBe('payments');
+    expect(fks[0].toTable).toBe('orders');
+  });
+
+  it('merges base + a single shard (a lone shard without a base still does not)', () => {
+    const sql = `
+      CREATE TABLE orders (id BIGINT PRIMARY KEY, total INT);
+      CREATE TABLE orders_202401 (id BIGINT PRIMARY KEY, total INT);
+    `;
+    const result = mergeShardedTables(parseSql(sql));
+    expect(result.groups).toHaveLength(1);
+    expect(result.schema.tables.map((t) => t.name)).toEqual(['orders']);
+    expect(result.schema.tables[0].shardInfo?.shards).toEqual(['orders_202401']);
+  });
+
+  it('keeps an incompatible same-named table separate and emits a neutral notice', () => {
+    const sql = `
+      CREATE TABLE orders (code VARCHAR(40) PRIMARY KEY, label VARCHAR(80));
+      CREATE TABLE orders_202401 (id BIGINT PRIMARY KEY, total INT);
+      CREATE TABLE orders_202402 (id BIGINT PRIMARY KEY, total INT);
+    `;
+    const result = mergeShardedTables(parseSql(sql));
+    // Shards still merge to orders_* under the old convention; the base stays.
+    expect(result.schema.tables.map((t) => t.name).sort()).toEqual(['orders', 'orders_*']);
+    expect(result.groups[0].baseTableName).toBeUndefined();
+    expect(result.notices.join('')).toContain('列结构不一致');
+  });
+
+  it('emits the incompatibility notice even when no group forms (base + one mismatched shard)', () => {
+    const sql = `
+      CREATE TABLE orders (code VARCHAR(40) PRIMARY KEY);
+      CREATE TABLE orders_202401 (id BIGINT PRIMARY KEY, total INT);
+    `;
+    const result = mergeShardedTables(parseSql(sql));
+    expect(result.groups).toHaveLength(0);
+    expect(result.schema.tables.map((t) => t.name).sort()).toEqual(['orders', 'orders_202401']);
+    expect(result.notices.join('')).toContain('列结构不一致');
+  });
+
+  it('adopts the widest shard definition while keeping the base name', () => {
+    const sql = `
+      CREATE TABLE orders (id BIGINT PRIMARY KEY, total INT);
+      CREATE TABLE orders_202401 (id BIGINT PRIMARY KEY, total INT, extra1 INT, extra2 INT);
+      CREATE TABLE orders_202402 (id BIGINT PRIMARY KEY, total INT);
+    `;
+    const result = mergeShardedTables(parseSql(sql));
+    const rep = result.schema.tables[0];
+    expect(rep.name).toBe('orders');
+    expect(rep.columns.map((c) => c.name).sort()).toEqual(['extra1', 'extra2', 'id', 'total']);
+  });
+
+  it('matches the base table case-insensitively and keeps its original casing', () => {
+    const sql = `
+      CREATE TABLE Orders (id BIGINT PRIMARY KEY, total INT);
+      CREATE TABLE orders_202401 (id BIGINT PRIMARY KEY, total INT);
+      CREATE TABLE orders_202402 (id BIGINT PRIMARY KEY, total INT);
+    `;
+    const result = mergeShardedTables(parseSql(sql));
+    expect(result.groups).toHaveLength(1);
+    expect(result.schema.tables.map((t) => t.name)).toEqual(['Orders']);
+  });
+});

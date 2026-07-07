@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useApp } from '../../store';
+import { parseSql } from '../../parser';
 import { SAMPLE_ECOMMERCE, SAMPLE_BLOG } from '../../samples';
 
 interface Props {
@@ -45,6 +46,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
   const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null);
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -58,6 +60,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
       setText(currentSql);
       setLoadedFile(null);
       setSamplesOpen(false);
+      setError(null);
     }
   }, [open, currentSql]);
 
@@ -72,7 +75,21 @@ export function SqlInputDialog({ open, onClose }: Props) {
 
   const submit = useCallback(() => {
     if (!text.trim()) return;
-    setSql(text);
+    // Pre-flight parse before committing: `setSql` unconditionally clears
+    // decisions, layout and the recycle bin, so garbage input (or a parser
+    // throw) must not be allowed to wipe the current workspace.
+    try {
+      const parsed = parseSql(text);
+      if (parsed.tables.length === 0) {
+        setError('未解析出任何表：请确认粘贴的是 CREATE TABLE / ALTER TABLE 脚本。当前图保持不变。');
+        return;
+      }
+      setSql(text);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`解析失败：${msg} —— 当前图保持不变。`);
+      return;
+    }
     onClose();
   }, [setSql, text, onClose]);
 
@@ -288,8 +305,10 @@ export function SqlInputDialog({ open, onClose }: Props) {
             value={text}
             onChange={(e) => {
               setText(e.target.value);
-              // Manual edits invalidate the "loaded from file" badge.
+              // Manual edits invalidate the "loaded from file" badge and any
+              // stale parse-failure message.
               if (loadedFile) setLoadedFile(null);
+              if (error) setError(null);
             }}
             placeholder={PLACEHOLDER}
             spellCheck={false}
@@ -308,6 +327,17 @@ export function SqlInputDialog({ open, onClose }: Props) {
             </div>
           )}
         </div>
+
+        {/* Parse-failure feedback: shown instead of silently discarding the
+            current diagram; cleared on edit or reopen. */}
+        {error && (
+          <div
+            className="px-5 py-2 text-[12px] leading-snug text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-900/20 border-t border-rose-100 dark:border-rose-900/40"
+            role="alert"
+          >
+            {error}
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between px-5 py-3 border-t border-ink-100 dark:border-inkd-300 bg-ink-50/60 dark:bg-inkd-50/60 rounded-b-xl">

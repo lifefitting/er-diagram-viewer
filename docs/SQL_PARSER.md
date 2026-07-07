@@ -74,7 +74,7 @@ parseSql(sql) → mergeShardedTables() → inferForeignKeys() → inferModules()
 - `Column.normalizedType` 是规约后的枚举（`int / float / string / date / bool / blob / json / uuid / unknown`），下游推断引擎只比较归一类型，不碰 `rawType`。`unknown` 与任何类型兼容（语义是"我不确定，给个机会"）。
 - `ForeignKey.source = 'explicit' | 'inferred'`：从 SQL 里直接抠出来的是 explicit；推断引擎生成的是 inferred。下游 UI / 导出都靠这个字段做分支。
 - `Schema.warnings` 是用户可见的告警条；`Schema.notices` 是"中性信息"（如"合并了 3 组分表"），UI 上以不同样式呈现。
-- `Table.shardInfo` 仅在分片合并后填充——一个 Table 有 shardInfo ⇔ 它是 ≥2 张物理分片表的代表节点。
+- `Table.shardInfo` 仅在分片合并后填充——一个 Table 有 shardInfo ⇔ 它是「≥2 张物理分片表」或「基表 + ≥1 张分片」合并后的代表节点。
 
 ### 2.2 `parser/tokenize.ts`（263 行）
 
@@ -224,7 +224,7 @@ for (const stmt of splitStatements(sql)) {
 **问题域**：很多 MySQL 库为了水平扩展把单表拆成 `orders_0 .. orders_31`、或按时间拆成 `t_log_202401 .. t_log_202412`。这些表 schema 完全一样，但 cytoscape 会把它们渲成几十个孤立节点；FK 推断也会在它们之间生成笛卡尔级别的噪声边。
 
 **输入**：刚出炉的 `Schema`（已经包含全部物理分片表）。
-**输出**：新的 `Schema`，分片表合并成单个代表节点，名字带 `_*` 后缀，并把 `shardInfo` 填充到代表节点上以便 UI 显示徽标。
+**输出**：新的 `Schema`，分片表合并成单个代表节点，并把 `shardInfo` 填充到代表节点上以便 UI 显示徽标。存在同名同构基表（如 `orders` + `orders_202401…`，PG 分区父表 / MySQL 热表+归档表形态）时基表一并被吸收，节点保留基表原名；没有基表时名字带 `_*` 后缀。
 
 #### 后缀识别策略
 
@@ -246,17 +246,19 @@ for (const stmt of splitStatements(sql)) {
 
 #### 合并步骤
 
-1. **分桶**：每张表跑一次 `extractShardBase()`；不返回 base 的表跳过；返回的按 `base.toLowerCase()` 入桶。
-2. **过滤孤儿**：桶里只有一张表的不算分片（`orders_2024` 单独存在不应被改名为 `orders_*`）。
-3. **选代表**：列数最多的胜出；并列时按字典序。代表节点的 `name` 改成 `${base}_*`，并设置 `shardInfo = { base, shards }`。
-4. **重写 FK**：所有指向分片表的 explicit FK 重定向到代表节点；rewrite 后形成的 `rep → rep` 自环丢弃；用 `from.cols->to.cols` 去重。
-5. **产 notice**：`合并了 N 组分表（共 M 张物理表归并为 N 个代表节点）：xxx_*（k 张）、yyy_*（m 张）...`
+1. **分桶**：每张表跑一次 `extractShardBase()`；不返回 base 的表进 `baseTables` 旁路索引（供基表吸收查询）；返回的按 `base.toLowerCase()` 入桶。
+2. **基表吸收判定**：桶的 key 若命中某张无后缀表，且其列名集合（小写比较）与「列最多的分片」互为子集或相等，则该基表并入本组；列结构不一致时基表保持独立并产一条中性 notice（「列结构不一致，未合并」）。类型不参与比较——与分片间不校验结构的宽松风格一致。
+3. **过滤孤儿**：桶里只有一张表且无可吸收基表的不算分片（`orders_2024` 单独存在不应被改名为 `orders_*`）；有兼容基表时「基表 + 1 张分片」也合并。
+4. **选代表**：全体成员（含被吸收基表）中列数最多的胜出；并列时按字典序（基表名最短，平局时天然胜出）。有基表时代表节点的 `name` 用基表原名（保留原大小写），否则改成 `${base}_*`；均设置 `shardInfo = { base, shards }`（shards 只列带后缀的物理分片）。
+5. **重写 FK**：所有指向分片表的 explicit FK 重定向到代表节点；rewrite 后形成的 `rep → rep` 自环丢弃（含「分区 → 父表」FK 坍缩成的自环）；用 `from.cols->to.cols` 去重。
+6. **产 notice**：`合并了 N 组分表（共 M 张物理表归并为 N 个代表节点）：orders（基表 + k 张分表）、yyy_*（m 张）...`
 
 #### 注意细节
 
 - **代表节点的 name 修改时机**：必须**先**把代表节点的原名（如 `account_detail_202401`）加入 `rename` 映射，再修改 `rep.name`——否则代表节点自身的 outbound FK 会找不到 rename 条目，rewrite 失败。`mergeShardedTables.ts:115-121` 的注释专门说了这一点。
 - **schema 不可变性**：代表节点的 `name` 是**就地修改**的（`rep.name = displayName`）——这是出于性能考虑，避免复制整张 Table。下游 inferFK 不依赖这个名字的原始性，但**调用方必须意识到 mergeShardedTables 会就地改 schema**。
-- **隐式 FK 在 merge 之后才推断**：所以推断引擎只看到代表节点，不会基于分片名生成关联。
+- **隐式 FK 在 merge 之后才推断**：所以推断引擎只看到代表节点，不会基于分片名生成关联。基表被吸收后节点用真实表名，`payments.order_id → orders` 这类推断能直接命中（`_*` 后缀名反而无法被候选名生成器命中）。
+- **drop 按对象身份而非表名**：代表节点可能接管被吸收基表的名字（分片改名为 `orders`），按名字过滤会把两者一起删掉，所以 `dropped` 是 `Set<Table>`。
 
 #### 测试覆盖
 

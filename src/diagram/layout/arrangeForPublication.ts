@@ -132,13 +132,6 @@ export function arrangeForPublication(cy: Core): void {
   });
   g.setDefaultEdgeLabel(() => ({}));
 
-  tables.forEach((n) => {
-    g.setNode(n.id(), {
-      width: (n.data('boxWidth') as number) ?? 240,
-      height: (n.data('boxHeight') as number) ?? 80,
-    });
-  });
-
   const allEdges = cy.edges();
 
   // Reduce each real (child -> parent) FK to a weighted layout edge, then
@@ -157,22 +150,34 @@ export function arrangeForPublication(cy: Core): void {
   }));
   const pairs = collapseLayoutPairs(rawEdges);
 
-  pairs.forEach((p, key) => {
-    g.setEdge(p.parent, p.child, { weight: p.weight, minlen: 1 }, key);
-  });
-
-  dagre.layout(g);
-
-  // Tables touched by any visible FK (incl. self-loops) stay in the main graph;
-  // the rest are packed into a grid so they don't litter dagre's rank 0.
+  // Tables touched by a cross-table FK go into dagre; everything else is
+  // grid-placed below. CRITICAL: isolated tables must NOT be added to the dagre
+  // graph — with a mostly-disconnected schema (few FKs, many standalone tables)
+  // dagre stacks every edgeless node into a tall rank-0 column, which inflates
+  // the connected nodes' coordinates and leaves a huge empty vertical gap the
+  // camera then centers on (blank canvas on import). Feeding dagre only the
+  // connected subgraph keeps it compact; the isolated grid sits right below it.
+  // A self-loop is not a cross-table edge (collapseLayoutPairs drops it), so a
+  // self-loop-only table is treated as isolated — it still routes its U-loop.
   const connected = new Set<string>();
   pairs.forEach((p) => {
     connected.add(p.parent);
     connected.add(p.child);
   });
-  allEdges.forEach((e) => {
-    if (e.source().id() === e.target().id()) connected.add(e.source().id());
+
+  tables.forEach((n) => {
+    if (!connected.has(n.id())) return;
+    g.setNode(n.id(), {
+      width: (n.data('boxWidth') as number) ?? 240,
+      height: (n.data('boxHeight') as number) ?? 80,
+    });
   });
+
+  pairs.forEach((p, key) => {
+    g.setEdge(p.parent, p.child, { weight: p.weight, minlen: 1 }, key);
+  });
+
+  dagre.layout(g);
 
   cy.batch(() => {
     let maxX = -Infinity;

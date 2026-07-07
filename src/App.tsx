@@ -7,6 +7,7 @@ import { Sidebar } from './ui/sidebar/Sidebar';
 import { useApp } from './store';
 import { SAMPLE_ECOMMERCE } from './samples';
 import { useApplyTheme } from './ui/theme/useApplyTheme';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 
 // Lazy-load the diagram canvas. Pulling cytoscape (≈250 KB minified) only
 // when there's actually a schema to render lets the first paint complete
@@ -30,15 +31,29 @@ export default function App() {
     //      collapse states, etc. all come back. Survives ⌘R.
     //   2. No persisted SQL → first-time visit, load the bundled sample so
     //      the canvas isn't empty.
-    //   3. Persisted SQL exists but parse failed → fall through to sample
-    //      with a console warning so the user still sees something.
+    //   3. Persisted SQL exists but parse failed → KEEP rawSql (it may be
+    //      irreplaceable production DDL; the import dialog still shows it for
+    //      hand-fixing) and surface the failure as an empty canvas plus a
+    //      sidebar warning. Never overwrite the user's SQL with the sample.
     const state = useApp.getState();
     if (state.rawSql) {
       try {
         state.reparse();
       } catch (err) {
-        console.warn('[startup] failed to reparse persisted SQL, falling back to sample:', err);
-        state.setSql(SAMPLE_ECOMMERCE);
+        console.error('[startup] failed to reparse persisted SQL:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        useApp.setState({
+          schema: {
+            tables: [],
+            explicitForeignKeys: [],
+            warnings: [
+              {
+                line: 0,
+                message: `已保存的 SQL 解析失败：${msg} —— 原文仍保留，打开「导入 SQL」可查看并修改。`,
+              },
+            ],
+          },
+        });
       }
     } else {
       state.setSql(SAMPLE_ECOMMERCE);
@@ -57,9 +72,11 @@ export default function App() {
       <div className="flex-1 relative min-h-0 overflow-hidden">
         <main className="absolute inset-0">
           {schema && schema.tables.length > 0 ? (
-            <Suspense fallback={<CanvasLoading />}>
-              <DiagramCanvas />
-            </Suspense>
+            <ErrorBoundary>
+              <Suspense fallback={<CanvasLoading />}>
+                <DiagramCanvas />
+              </Suspense>
+            </ErrorBoundary>
           ) : (
             <div className="h-full flex items-center justify-center text-ink-400 dark:text-inkd-500 text-sm">
               点击「导入 SQL」开始

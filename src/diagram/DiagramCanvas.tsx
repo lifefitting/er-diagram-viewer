@@ -249,8 +249,19 @@ export function DiagramCanvas() {
     if (cy) {
       // Read each node's position ONCE into a map, then sort against it —
       // cy.getElementById(...).position() inside the comparator would re-look-up
-      // O(n log n) times.
-      const pos = new Map(ids.map((id) => [id, cy.getElementById(id).position()]));
+      // O(n log n) times. A match can reference a node not yet in cy (this
+      // effect runs before the rebuild effect in the same commit, e.g. on
+      // recycle-bin restore or re-import with an active search); park those at
+      // a huge finite coordinate (finite so two missing nodes compare to 0,
+      // not NaN) so they sort last instead of crashing the comparator — the
+      // rebuild re-runs this effect (via `positions`) with real coordinates.
+      const FAR = Number.MAX_SAFE_INTEGER;
+      const pos = new Map(
+        ids.map((id) => {
+          const n = cy.getElementById(id);
+          return [id, n.length > 0 ? n.position() : { x: FAR, y: FAR }] as const;
+        }),
+      );
       ids.sort((a, b) => {
         const pa = pos.get(a)!;
         const pb = pos.get(b)!;
@@ -731,18 +742,32 @@ export function DiagramCanvas() {
     // Restore positions: an in-session position first, then the PERSISTED layout
     // (so a page refresh keeps the arrangement). Only auto-layout when no node
     // has any known position (true first load, or an all-new schema).
+    //
+    // Fresh-import detection: `setSql` clears `nodePositions` (import = fresh
+    // start), while every other mid-session rebuild has a persisted layout
+    // (persistLayout runs after each structural rebuild and drag). So an empty
+    // store while cy still holds the previous diagram means the user just
+    // imported — discard the stale in-session positions too, or surviving
+    // tables get pinned in place and previously-deleted tables (absent from
+    // both maps) pile up in the `maxX + 220` stack below.
     const saved = useApp.getState().nodePositions;
+    const freshImport = Object.keys(saved).length === 0;
     const newlyAdded: cytoscape.NodeSingular[] = [];
     cy.nodes().forEach((n) => {
-      const p = prevPositions.get(n.id()) ?? saved[n.id()];
+      const p = freshImport ? undefined : (prevPositions.get(n.id()) ?? saved[n.id()]);
       if (p) n.position(p);
       else newlyAdded.push(n);
     });
     if (newlyAdded.length === cy.nodes().length) {
       // Nothing to restore → fresh auto-layout (static dagre channels).
       manualMoveRef.current = false;
-      runLayout(cy);
-      persistLayout(cy);
+      if (cy.nodes().length > 0) {
+        runLayout(cy);
+        persistLayout(cy);
+      }
+      // 0 nodes (everything recycle-binned): skip persistLayout — it would
+      // overwrite `nodePositions` with {}, losing the arrangement that restore
+      // relies on AND making the store look like a fresh import (see above).
     } else {
       // Some positions restored — treat as a manual layout so blocked edges use
       // the live obstacle-avoiding detour (a restored layout has no dagre

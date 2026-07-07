@@ -116,7 +116,35 @@ export function parseSql(sql: string): Schema {
     // Silently skip unrelated statements (INSERT, COMMIT, SET, GRANT, ...).
   }
 
-  return { tables, explicitForeignKeys: dedupeFks(explicitForeignKeys), warnings };
+  return {
+    tables,
+    explicitForeignKeys: dropDanglingFks(dedupeFks(explicitForeignKeys), tables, warnings),
+    warnings,
+  };
+}
+
+/**
+ * Drop FKs whose endpoint table isn't defined in this script. Cytoscape
+ * throws on edges with a nonexistent node, which unmounts the whole canvas —
+ * and a partial paste (referenced table not included) is an everyday case,
+ * not a user error. Warn so the sidebar explains the missing edge.
+ */
+function dropDanglingFks(
+  list: ForeignKey[],
+  tables: Table[],
+  warnings: ParseWarning[],
+): ForeignKey[] {
+  const known = new Set(tables.map((t) => t.name.toLowerCase()));
+  return list.filter((fk) => {
+    const missing = [fk.fromTable, fk.toTable].find((t) => !known.has(t.toLowerCase()));
+    if (!missing) return true;
+    warnings.push({
+      line: 0,
+      message: `Foreign key skipped: table \`${missing}\` is not defined in this script.`,
+      snippet: `${fk.fromTable}.${fk.fromColumns.join(',')} -> ${fk.toTable}.${fk.toColumns.join(',')}`,
+    });
+    return false;
+  });
 }
 
 function preview(s: string): string {
