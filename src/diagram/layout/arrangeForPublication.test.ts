@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import cytoscape from 'cytoscape';
 import {
+  arrangeForPublication,
   layoutEdgeWeight,
   collapseLayoutPairs,
   pairKey,
@@ -89,5 +91,36 @@ describe('collapseLayoutPairs', () => {
     ]);
     expect(pairs.size).toBe(1);
     expect(pairs.has(pairKey('post', 'comment'))).toBe(true);
+  });
+});
+
+describe('arrangeForPublication / isolated tables', () => {
+  const node = (id: string) => ({
+    group: 'nodes' as const,
+    data: { id, type: 'table', rawName: id, boxWidth: 240, boxHeight: 460 },
+  });
+
+  it('does not stack isolated tables into a giant vertical gap', () => {
+    // 1 small connected pair + 28 isolated tables — the excashier.sql shape.
+    // Before the fix, dagre stacked all 30 nodes into a ~14000px rank-0 column,
+    // leaving a huge empty vertical gap the camera centered on (blank canvas).
+    const cy = cytoscape({ headless: true });
+    const els: cytoscape.ElementDefinition[] = [node('a'), node('b')];
+    els.push({ group: 'edges', data: { id: 'e0', source: 'a', target: 'b' } });
+    for (let i = 0; i < 28; i++) els.push(node(`iso_${i}`));
+    cy.add(els);
+
+    arrangeForPublication(cy);
+
+    const ys = cy.nodes('[type = "table"]').map((n) => n.position().y);
+    ys.sort((p, q) => p - q);
+    const height = ys[ys.length - 1] - ys[0];
+    // A compact grid of ~30 tall cards is a few thousand px, nowhere near the
+    // ~19600px pathological stack.
+    expect(height).toBeLessThan(8000);
+    // No single empty vertical gap wider than a couple of card-heights.
+    let maxGap = 0;
+    for (let i = 1; i < ys.length; i++) maxGap = Math.max(maxGap, ys[i] - ys[i - 1]);
+    expect(maxGap).toBeLessThan(2000);
   });
 });
