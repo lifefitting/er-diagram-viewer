@@ -1637,7 +1637,7 @@ export function DiagramCanvas() {
       : '';
 
   return (
-    <div className="relative h-full w-full">
+    <div className={`relative h-full w-full ${connectDrag ? 'cy-cursor-connecting' : ''}`}>
       <div
         ref={containerRef}
         className={`cy-container absolute inset-0 ${canvasCursor}`}
