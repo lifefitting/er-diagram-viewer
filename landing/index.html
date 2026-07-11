@@ -452,15 +452,16 @@
       <!-- ============== HERO ============== -->
       <section class="hero">
         <div class="container">
-          <span class="badge">v0.3.0 · 更清晰的多连线布线</span>
+          <span class="badge">v0.3.1 · 评审套件：手动连线 / 逻辑关联 / 字段批注</span>
           <h1>
             把 SQL DDL 变成<br />
             <span class="accent">可交互的 ER 图</span>
           </h1>
           <p class="lead">
             粘贴 <code>CREATE TABLE</code> 脚本到浏览器，秒级生成数据库关系图。
-            即使脚本没有 <code>FOREIGN KEY</code>，也能按命名、类型、索引启发式推断外键，并允许人工确认。
-            画布可自由排布、隐藏噪声表、微调连线，布局与视口跨刷新自动保存。
+            即使脚本没有 <code>FOREIGN KEY</code>，也能按命名、类型、索引启发式推断外键，并允许人工确认；
+            推断不到的关系可以在字段间直接拖线补上，分库分表的业务键关联也能扫描出来。
+            边看边评：点字段写批注，最后一键导出评审报告与数据库设计说明文档。
             零后端，完全本地，导入的 SQL 不出你的浏览器。
           </p>
           <div class="cta-group">
@@ -622,9 +623,24 @@
               <p>一个 <code>er-diagram-viewer.html</code>（~900 KB）打包所有依赖，双击就能跑、可邮件、可 U 盘、可塞 wiki 附件，离线环境照常工作。</p>
             </div>
             <div class="feature">
+              <div class="feature-icon">✎</div>
+              <h3>手动连线 · 连完即所得</h3>
+              <p>推断不到的关系，直接从字段两侧的触点拖一条折线到目标字段：落在主键/唯一列记为物理外键，否则记为逻辑关联，松手即成、无需确认。支持批量选删、类型批量切换，同表关系走同侧折线回环。</p>
+            </div>
+            <div class="feature">
+              <div class="feature-icon">∿</div>
+              <h3>逻辑关联 · 业务键扫描</h3>
+              <p>分库分表没有物理外键？扫描 <code>out_trade_no</code> 这类跨表共享的业务键，由你勾选用哪些字段推断，生成无向点状关联线——不污染模块聚类，DDL 里以 <code>-- LOGICAL:</code> 注释留痕。</p>
+            </div>
+            <div class="feature">
+              <div class="feature-icon">✍</div>
+              <h3>字段评审批注</h3>
+              <p>点击任意字段弹出批注气泡，写下命名 / 类型 / 约束的评审意见，自动记录时间；右侧浮层实时汇总最近建议，点击即定位。批注随浏览器本地保存，刷新不丢。</p>
+            </div>
+            <div class="feature">
               <div class="feature-icon">⤓</div>
-              <h3>DDL 导出</h3>
-              <p>把你已确认的推断 FK 一键导出为 <code>ALTER TABLE ADD CONSTRAINT</code> 脚本，回写到工程仓库里把缺失的 FK 补完整。还能导出 PNG / SVG 用于评审材料。</p>
+              <h3>评审文档一键导出</h3>
+              <p>三种产出物：已确认 FK 的 <code>ALTER TABLE</code> 脚本、完整评审报告（决策状态 + 逻辑关联 + 带时间戳的字段意见）、标准格式的数据库设计说明文档。外加 PNG / SVG 图面材料。</p>
             </div>
             <div class="feature">
               <div class="feature-icon">✥</div>
