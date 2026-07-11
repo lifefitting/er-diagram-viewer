@@ -5,11 +5,18 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **拖线预览恢复为平滑曲线**：绘制过程用贝塞尔曲线（顺滑跟手），松手成形后才是
+  正交折线——「过程平滑、结果规整」。v0.3.1 曾把预览也改成折线，属理解偏差，撤回。
+
 ### 计划中
 
 - 产品方向四阶段规划（工作区存档、schema diff、规范检查等）见 [roadmap.md](roadmap.md)。
-- 布线引擎统一（始终走 `detourRoute`、退役 dagre 通道航点）、side-bracket 泛化。
-  详见 `TODO-fix-bugs.md`。
+- side-bracket 泛化（`gapX < 0` 限制）。详见 `TODO-fix-bugs.md`。
+  ——原「布线引擎统一」条目经复核**决定不做**：导出与画布本就同源（都读
+  `routePoints`），双路径各有分工（静态走 dagre 通道、交互走实时绕行）；
+  结论与注意事项记录在 `TODO-fix-bugs.zh-CN.md` P2 #1。
 
 ## [0.3.1] — 2026-07-11
 

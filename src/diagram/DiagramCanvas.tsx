@@ -1752,21 +1752,24 @@ export function DiagramCanvas() {
               : '#f43f5e'
             : '#0ea5e9';
           const { start, cursor, dir } = connectDrag;
-          // Orthogonal H-V-H rubber polyline — the same shape the committed
-          // edge will actually route as (the canvas has no curved edges).
-          // Leave the card horizontally on the grabbed dot's side; the
-          // vertical leg sits midway when heading forward, or on a short
-          // same-side elbow when the cursor is behind the start / on the SAME
-          // table (mirroring the committed U-bracket).
+          // The DRAG preview is a smooth node-editor-style cubic — drawing
+          // should feel fluid; only the COMMITTED edge snaps to the canvas's
+          // orthogonal polyline style. Leave the card horizontally on the
+          // grabbed dot's side, approach the cursor from the side facing the
+          // start; hovering a field of the SAME table bends both handles out
+          // the grab side (a same-side U, foreshadowing the committed
+          // U-bracket). Handle length scales with distance so short drags
+          // stay tight and long drags sweep smoothly.
           const dx = cursor.x - start.x;
+          const dy = cursor.y - start.y;
+          const reach = Math.max(36, Math.abs(dx) * 0.45, Math.abs(dy) * 0.3);
           const sameTable = connectDrag.target?.sameTable ?? false;
-          const elbowX =
-            sameTable || dx * dir < 48 ? start.x + dir * 46 : start.x + dx / 2;
+          const inDir = sameTable ? -dir : dx * dir >= 0 ? dir : -dir;
           const d =
             `M ${start.x} ${start.y} ` +
-            `L ${elbowX} ${start.y} ` +
-            `L ${elbowX} ${cursor.y} ` +
-            `L ${cursor.x} ${cursor.y}`;
+            `C ${start.x + dir * reach} ${start.y}, ` +
+            `${cursor.x - inDir * reach} ${cursor.y}, ` +
+            `${cursor.x} ${cursor.y}`;
           return (
             <svg
               className="pointer-events-none absolute inset-0 z-20 h-full w-full"
