@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import cytoscape, { type Core, type EdgeCollection } from 'cytoscape';
+import cytoscape, { type Core, type EdgeCollection, type EdgeSingular } from 'cytoscape';
 import {
   buildElements,
   buildFkSourceColumns,
@@ -10,6 +10,12 @@ import {
 } from './buildGraph';
 import { buildStylesheet } from './style';
 import { useApp, effectiveForeignKeys, visibleSchema } from '../store';
+import {
+  manualFkFromDraft,
+  validateManualFk,
+  type ManualFkDraft,
+} from '../store/manualFkValidate';
+import { fieldNoteKey, formatNoteTime } from '../store/notesSlice';
 import type { Table } from '../parser/types';
 import { colorForTableModule, type ModulesResult } from '../infer/inferModules';
 import {
@@ -142,6 +148,9 @@ export function DiagramCanvas() {
   const rawSchema = useApp((s) => s.schema);
   const inferred = useApp((s) => s.inferred);
   const decisions = useApp((s) => s.decisions);
+  const manualFks = useApp((s) => s.manualFks);
+  const fieldNotes = useApp((s) => s.fieldNotes);
+  const setFieldNote = useApp((s) => s.setFieldNote);
   const display = useApp((s) => s.display);
   const search = useApp((s) => s.search);
   const modules = useApp((s) => s.modules);
@@ -184,6 +193,65 @@ export function DiagramCanvas() {
   // The edge currently showing route-edit handles (hover, or held during a
   // segment drag). At most one edge's handles are ever shown.
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  // In-flight drag-to-connect gesture (started from a field row's connect dot):
+  // a smooth rubber curve from the source port to the cursor, plus the hovered
+  // drop row (with live validity). Container-relative px. `dir` is the
+  // horizontal exit direction of the grabbed dot (left dot = -1, right = +1)
+  // so the curve leaves the card naturally. Null when idle.
+  const [connectDrag, setConnectDrag] = useState<null | {
+    from: { table: string; col: string };
+    dir: 1 | -1;
+    start: { x: number; y: number };
+    cursor: { x: number; y: number };
+    /** `sameTable` = hovered row belongs to the source table — the rubber
+     *  curve then bends into a same-side U instead of cutting across the card. */
+    target: {
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      valid: boolean;
+      sameTable: boolean;
+    } | null;
+  }>(null);
+  // Transient result pill after a connect drop (success or why it was refused).
+  const [connectNotice, setConnectNotice] = useState<null | { text: string; tone: 'ok' | 'err' }>(
+    null,
+  );
+  const connectNoticeTimer = useRef<number | null>(null);
+  // Field-note bubble (评审批注): opened by clicking a field row; anchored
+  // below the row, container-relative. Null when closed.
+  const [noteEditor, setNoteEditor] = useState<null | {
+    table: string;
+    col: string;
+    x: number;
+    y: number;
+  }>(null);
+  // Manual relations currently selected on the canvas (fkKey → path label).
+  // Click a hand-drawn edge to select; Shift/⌘/Ctrl+click toggles membership
+  // for BATCH deletion — same modifier convention as table multi-select.
+  // Delete/Backspace (or the pill button) removes them all; Esc / background
+  // click clears. Only manual edges are selectable — inferred candidates are
+  // decided in the panel, explicit FKs live in the DDL.
+  const [selectedEdges, setSelectedEdges] = useState<Map<string, string>>(new Map());
+  const selectedEdgesRef = useRef(selectedEdges);
+  selectedEdgesRef.current = selectedEdges;
+  /** Single-click = replace selection; modifier click = toggle membership. */
+  const pickEdge = (fkKey: string, label: string, additive: boolean) => {
+    setSelectedEdges((prev) => {
+      const next = additive ? new Map(prev) : new Map<string, string>();
+      if (additive && prev.has(fkKey)) next.delete(fkKey);
+      else next.set(fkKey, label);
+      return next;
+    });
+  };
+  const deleteSelectedEdges = () => {
+    const s = useApp.getState();
+    for (const fkKey of selectedEdgesRef.current.keys()) {
+      s.removeManualFk(fkKey.split('#')[0]);
+    }
+    setSelectedEdges(new Map());
+  };
   // Bumped during a segment drag to re-render the handles from the live route.
   const [, bumpRouteTick] = useState(0);
   const draggingEdgeRef = useRef(false);
@@ -209,13 +277,75 @@ export function DiagramCanvas() {
   const effectiveFks = useMemo(
     () =>
       schema
-        ? effectiveForeignKeys(schema, inferred, decisions, display.showLowConfidence, deletedTables)
+        ? effectiveForeignKeys(
+            schema,
+            inferred,
+            decisions,
+            display.showLowConfidence,
+            deletedTables,
+            manualFks,
+            display,
+          )
         : [],
-    [schema, inferred, decisions, display.showLowConfidence, deletedTables],
+    [schema, inferred, decisions, display, deletedTables, manualFks],
   );
 
   /** table.name → Set of column names that act as FK source. Drives the FK badge. */
   const fkSourceColumns = useMemo(() => buildFkSourceColumns(effectiveFks), [effectiveFks]);
+
+  /** table.name → columns carrying a review note. Drives the amber row marker. */
+  const noteColumnsByTable = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const key of Object.keys(fieldNotes)) {
+      const i = key.indexOf('::');
+      if (i < 0) continue;
+      const t = key.slice(0, i);
+      let set = m.get(t);
+      if (!set) {
+        set = new Set();
+        m.set(t, set);
+      }
+      set.add(key.slice(i + 2));
+    }
+    return m;
+  }, [fieldNotes]);
+
+  // Reflect the manual-edge selection as a cy class. Rebuilds wipe classes and
+  // `positions` changes on every rebuild/pan, so it doubles as the re-apply
+  // trigger; selections whose edges vanished (deleted) are pruned.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    cy.edges('.manual-selected').removeClass('manual-selected');
+    if (selectedEdges.size === 0) return;
+    const found = new Set<string>();
+    cy.edges()
+      .filter((e) => selectedEdges.has(e.data('fkKey') as string))
+      .forEach((e) => {
+        found.add(e.data('fkKey') as string);
+        e.addClass('manual-selected');
+      });
+    if (found.size !== selectedEdges.size) {
+      setSelectedEdges((prev) => {
+        const next = new Map([...prev].filter(([k]) => found.has(k)));
+        return next.size === prev.size ? prev : next;
+      });
+    }
+  }, [selectedEdges, positions]);
+
+  /** Row click → open the review-note bubble anchored under that row. */
+  const onOpenNote = (table: string, col: string, e: React.MouseEvent) => {
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
+    const rect = containerEl.getBoundingClientRect();
+    const rr = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setNoteEditor({
+      table,
+      col,
+      x: Math.min(Math.max(rr.left - rect.left + Math.min(150, rr.width / 2), 156), rect.width - 156),
+      y: Math.min(Math.max(rr.bottom - rect.top + 6, 8), rect.height - 170),
+    });
+  };
 
   const searchSelection = useMemo<Selection>(
     () => deriveSearchSelection(schema, effectiveFks, search),
@@ -557,12 +687,22 @@ export function DiagramCanvas() {
       }
       const meta = evt.target.data('meta');
       const pos = evt.renderedPosition ?? { x: 0, y: 0 };
+      const isLogical = meta.kind === 'logical';
+      const head = isLogical
+        ? meta.source === 'manual'
+          ? '手动逻辑关联（业务键）'
+          : `推断逻辑关联 · ${evt.target.data('confidence')}`
+        : meta.source === 'explicit'
+          ? '显式 FK'
+          : meta.source === 'manual'
+            ? '手动添加 FK'
+            : `推断 FK · ${evt.target.data('confidence')}`;
       setTooltip({
         x: pos.x + 12,
         y: pos.y + 12,
         text:
-          (meta.source === 'explicit' ? '显式 FK' : `推断 FK · ${evt.target.data('confidence')}`) +
-          `\n${meta.fromColumns.join(', ')} → ${meta.toColumns.join(', ')}` +
+          head +
+          `\n${meta.fromColumns.join(', ')} ${isLogical ? '~' : '→'} ${meta.toColumns.join(', ')}` +
           (meta.reason ? `\n${meta.reason}` : ''),
       });
     });
@@ -582,6 +722,28 @@ export function DiagramCanvas() {
       if (evt.target === cy) {
         setFocusId(null);
         setSelectedIds(new Set());
+        setSelectedEdges(new Map());
+      }
+    });
+
+    // Click a hand-drawn edge to select it; Shift/⌘/Ctrl+click toggles it in
+    // the batch (Delete removes them all; see the keyboard effect + the
+    // bottom pill). Plain-clicking a non-manual edge clears the selection.
+    cy.on('tap', 'edge', (evt) => {
+      const meta = evt.target.data('meta');
+      const oe = evt.originalEvent as MouseEvent | undefined;
+      const additive = !!oe && (oe.shiftKey || oe.metaKey || oe.ctrlKey);
+      if (meta?.source === 'manual') {
+        const srcName = (evt.target.source().data('rawName') as string) ?? '';
+        const tgtName = (evt.target.target().data('rawName') as string) ?? '';
+        const sep = meta.kind === 'logical' ? '~' : '→';
+        pickEdge(
+          evt.target.data('fkKey') as string,
+          `${srcName}.${meta.fromColumns.join(',')} ${sep} ${tgtName}.${meta.toColumns.join(',')}`,
+          additive,
+        );
+      } else if (!additive) {
+        setSelectedEdges(new Map());
       }
     });
 
@@ -629,6 +791,8 @@ export function DiagramCanvas() {
       // Cancel a pending hide-handles timer too, so its setHoveredEdgeId(null)
       // can't fire after the component is gone (and leak the timer).
       if (hideHandlesTimer.current !== null) clearTimeout(hideHandlesTimer.current);
+      // Same for the connect-notice dismiss timer.
+      if (connectNoticeTimer.current !== null) clearTimeout(connectNoticeTimer.current);
       cy.destroy();
       cyRef.current = null;
       unbindView(); // also clears + unbinds the history machinery
@@ -655,6 +819,7 @@ export function DiagramCanvas() {
       } else if (e.key === 'Escape') {
         setFocusId(null);
         setSelectedIds(new Set());
+        setSelectedEdges(new Map());
       } else if (meta && e.key.toLowerCase() === 'z') {
         e.preventDefault(); // stop native page undo
         if (e.shiftKey) useApp.getState().redo();
@@ -672,11 +837,19 @@ export function DiagramCanvas() {
         e.preventDefault();
         getView()?.zoomToSelection();
       } else if (!meta && (e.key === 'Delete' || e.key === 'Backspace')) {
-        // Recycle-bin the selected tables (hide; SQL untouched). preventDefault
-        // unconditionally so Backspace never navigates the page back; act only
-        // when something is selected, and clear the selection synchronously so
-        // the count pill doesn't render stale.
+        // preventDefault unconditionally so Backspace never navigates back.
+        // A selected manual edge takes priority: Delete removes the relation.
+        // Otherwise recycle-bin the selected tables (hide; SQL untouched),
+        // clearing the selection synchronously so the pill doesn't go stale.
         e.preventDefault();
+        if (selectedEdgesRef.current.size > 0) {
+          const s = useApp.getState();
+          for (const fkKey of selectedEdgesRef.current.keys()) {
+            s.removeManualFk(fkKey.split('#')[0]);
+          }
+          setSelectedEdges(new Map());
+          return;
+        }
         const cy = cyRef.current;
         const ids = [...selectedIdsRef.current];
         if (cy && ids.length) {
@@ -1264,6 +1437,139 @@ export function DiagramCanvas() {
     ev.stopPropagation();
   };
 
+  /**
+   * Drag-to-connect: mousedown on a field row's connect dot starts a rubber
+   * curve; dropping on another field row (found via elementFromPoint +
+   * `[data-fk-col]`) creates the relation IMMEDIATELY — 连完即所得, no per-drop
+   * confirmation. The relation kind defaults from what the drop target IS: a
+   * PK/unique column can be referenced by a physical FK; anything else can
+   * only be a business-key (logical) association. The 手动连线 panel is where
+   * types are reviewed and batch-edited afterwards. Esc or dropping on empty
+   * canvas cancels.
+   */
+  const onConnectStart = (
+    fromTable: string,
+    fromCol: string,
+    side: 'left' | 'right',
+    e: React.MouseEvent,
+  ) => {
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
+    const rect = containerEl.getBoundingClientRect();
+    const start = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const dir: 1 | -1 = side === 'right' ? 1 : -1;
+    let cancelled = false;
+    let last = { x: e.clientX, y: e.clientY };
+
+    const findDropRow = (cx: number, cyPx: number) => {
+      const el = document.elementFromPoint(cx, cyPx) as HTMLElement | null;
+      const rowEl = el?.closest?.('[data-fk-col]') as HTMLElement | null;
+      if (!rowEl) return null;
+      return { el: rowEl, table: rowEl.dataset.fkTable ?? '', col: rowEl.dataset.fkCol ?? '' };
+    };
+    // Default relation kind for a drop target: referencing a PK/unique column
+    // is a physical FK; a non-unique column can only be a business-key link.
+    const kindFor = (toTable: string, toCol: string): 'fk' | 'logical' => {
+      const t = useApp.getState().schema?.tables.find((x) => x.name === toTable);
+      const c = t?.columns.find((x) => x.name === toCol);
+      if (!t || !c) return 'fk';
+      return c.isPrimaryKey || t.primaryKey.includes(c.name) || c.isUnique ? 'fk' : 'logical';
+    };
+    const validate = (toTable: string, toCol: string) => {
+      const s = useApp.getState();
+      return validateManualFk(
+        {
+          fromTable,
+          fromColumn: fromCol,
+          toTable,
+          toColumn: toCol,
+          kind: kindFor(toTable, toCol),
+        },
+        s.schema,
+        s.inferred,
+        s.manualFks,
+      );
+    };
+
+    const onKey = (ke: KeyboardEvent) => {
+      if (ke.key === 'Escape') {
+        cancelled = true;
+        setConnectDrag(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    setConnectDrag({
+      from: { table: fromTable, col: fromCol },
+      dir,
+      start,
+      cursor: start,
+      target: null,
+    });
+
+    const onMove = (mv: MouseEvent) => {
+      if (cancelled) return;
+      last = { x: mv.clientX, y: mv.clientY };
+      const drop = findDropRow(mv.clientX, mv.clientY);
+      let target: NonNullable<typeof connectDrag>['target'] = null;
+      if (drop) {
+        const r = drop.el.getBoundingClientRect();
+        target = {
+          x: r.left - rect.left,
+          y: r.top - rect.top,
+          w: r.width,
+          h: r.height,
+          valid: validate(drop.table, drop.col) === null,
+          sameTable: drop.table === fromTable,
+        };
+      }
+      setConnectDrag((d) =>
+        d ? { ...d, cursor: { x: mv.clientX - rect.left, y: mv.clientY - rect.top }, target } : d,
+      );
+    };
+    const onUp = () => {
+      window.removeEventListener('keydown', onKey);
+      setConnectDrag(null);
+      if (cancelled) return;
+      const drop = findDropRow(last.x, last.y);
+      if (!drop) return; // released on empty canvas — silent cancel
+      if (fromTable === drop.table && fromCol === drop.col) {
+        showConnectNotice('不能指向自身同一列', 'err');
+        return;
+      }
+      const kind = kindFor(drop.table, drop.col);
+      const draft: ManualFkDraft = {
+        fromTable,
+        fromColumn: fromCol,
+        toTable: drop.table,
+        toColumn: drop.col,
+        kind,
+        side,
+      };
+      const s = useApp.getState();
+      const err = validateManualFk(draft, s.schema, s.inferred, s.manualFks);
+      if (err) {
+        showConnectNotice(err, 'err');
+        return;
+      }
+      s.addManualFk(manualFkFromDraft(draft));
+      const sep = kind === 'logical' ? '~' : '→';
+      showConnectNotice(
+        `${kind === 'logical' ? '已连线：逻辑关联' : '已连线：物理外键'} ${fromTable}.${fromCol} ${sep} ${drop.table}.${drop.col} · 类型可在「手动连线」面板调整`,
+        'ok',
+      );
+    };
+    beginDrag(onMove, onUp);
+  };
+
+  const showConnectNotice = (text: string, tone: 'ok' | 'err') => {
+    if (connectNoticeTimer.current !== null) clearTimeout(connectNoticeTimer.current);
+    setConnectNotice({ text, tone });
+    connectNoticeTimer.current = window.setTimeout(() => {
+      connectNoticeTimer.current = null;
+      setConnectNotice(null);
+    }, 2400);
+  };
+
   // Dedicated classes (not Tailwind's `cursor-*`) because cytoscape writes an
   // inline cursor on its container/canvas during interaction; only an
   // !important rule (see styles.css) wins over that. SELECT mode keeps the
@@ -1281,6 +1587,92 @@ export function DiagramCanvas() {
         className={`cy-container absolute inset-0 ${canvasCursor}`}
         onMouseDown={onCanvasMouseDown}
       />
+      {/* Self-loop layer: cytoscape can't render loop edges with the segments
+          curve style (and its bezier loops dock at the node boundary instead
+          of the field rows), so same-table relations are drawn here as the
+          exact orthogonal U-bracket from routePoints — beneath the cards,
+          matching the SVG export. Manual loops are click-selectable. */}
+      {cyRef.current &&
+        (() => {
+          const cy = cyRef.current;
+          // Loops carry a non-empty `loopSide` (buildGraph) — cheaper and
+          // type-friendlier than comparing source/target ids here.
+          const loops = cy.edges('[loopSide != ""]').filter((e) => !!e.data('loopSide'));
+          if (loops.length === 0) return null;
+          const pan = cy.pan();
+          const zoom = cy.zoom();
+          return (
+            <svg
+              className="pointer-events-none absolute inset-0 h-full w-full"
+              aria-hidden="true"
+            >
+              {loops.map((el) => {
+                const e = el as EdgeSingular;
+                const pts = routeToPoints(e.data('routePoints') as string).map((p) => ({
+                  x: p.x * zoom + pan.x,
+                  y: p.y * zoom + pan.y,
+                }));
+                if (pts.length < 2) return null;
+                const meta = e.data('meta') ?? {};
+                const isLogical = e.data('kind') === 'logical';
+                const pending = e.data('lineStyle') === 'dashed';
+                const color =
+                  ((isDark ? e.data('colorDark') : e.data('color')) as string) ?? '#64748b';
+                const key = e.data('fkKey') as string;
+                const selected = selectedEdges.has(key);
+                const opacity = selected ? 1 : isLogical && pending ? 0.45 : pending ? 0.7 : 0.85;
+                const ptsStr = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+                const last = pts[pts.length - 1];
+                const prev = pts[pts.length - 2] ?? last;
+                const dirX = Math.sign(last.x - prev.x) || 1;
+                return (
+                  <g key={e.id()}>
+                    {meta.source === 'manual' && (
+                      <polyline
+                        points={ptsStr}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth={Math.max(10, 12 * zoom)}
+                        style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                        onClick={(ev) => {
+                          const name = (e.source().data('rawName') as string) ?? '';
+                          const sep = isLogical ? '~' : '→';
+                          pickEdge(
+                            key,
+                            `${name}.${meta.fromColumns?.join(',')} ${sep} ${name}.${meta.toColumns?.join(',')}`,
+                            ev.shiftKey || ev.metaKey || ev.ctrlKey,
+                          );
+                        }}
+                      />
+                    )}
+                    <polyline
+                      points={ptsStr}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={(selected ? 3 : 1.6) * zoom}
+                      strokeDasharray={
+                        isLogical ? `${2 * zoom} ${4 * zoom}` : pending ? `${6 * zoom} ${4 * zoom}` : undefined
+                      }
+                      opacity={opacity}
+                    />
+                    {isLogical ? (
+                      <>
+                        <circle cx={pts[0].x} cy={pts[0].y} r={3 * zoom} fill={color} opacity={opacity} />
+                        <circle cx={last.x} cy={last.y} r={3 * zoom} fill={color} opacity={opacity} />
+                      </>
+                    ) : (
+                      <polygon
+                        points={`${last.x},${last.y} ${last.x - dirX * 8 * zoom},${last.y - 4 * zoom} ${last.x - dirX * 8 * zoom},${last.y + 4 * zoom}`}
+                        fill={color}
+                        opacity={opacity}
+                      />
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+          );
+        })()}
       {positions.map((p) => {
         const flashing = flashTables.includes(p.table.name);
         const state: OverlayState = selection
@@ -1310,6 +1702,9 @@ export function DiagramCanvas() {
             onResizeHandle={(e) => onTableResize(e, p.table.name, p.id)}
             onToggleCollapse={() => toggleCollapsed(p.table.name)}
             onResetWidth={() => setTableWidth(p.table.name, null)}
+            onConnectStart={(col, side, e) => onConnectStart(p.table.name, col, side, e)}
+            noteColumns={noteColumnsByTable.get(p.table.name)}
+            onOpenNote={(col, e) => onOpenNote(p.table.name, col, e)}
           />
         );
       })}
@@ -1346,6 +1741,127 @@ export function DiagramCanvas() {
           style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }}
         />
       )}
+      {connectDrag &&
+        (() => {
+          // Neutral sky while roaming; green/red once a drop row is hovered so
+          // the whole curve (and its arrowhead) telegraphs whether releasing
+          // here will connect.
+          const tip = connectDrag.target
+            ? connectDrag.target.valid
+              ? '#10b981'
+              : '#f43f5e'
+            : '#0ea5e9';
+          const { start, cursor, dir } = connectDrag;
+          // Orthogonal H-V-H rubber polyline — the same shape the committed
+          // edge will actually route as (the canvas has no curved edges).
+          // Leave the card horizontally on the grabbed dot's side; the
+          // vertical leg sits midway when heading forward, or on a short
+          // same-side elbow when the cursor is behind the start / on the SAME
+          // table (mirroring the committed U-bracket).
+          const dx = cursor.x - start.x;
+          const sameTable = connectDrag.target?.sameTable ?? false;
+          const elbowX =
+            sameTable || dx * dir < 48 ? start.x + dir * 46 : start.x + dx / 2;
+          const d =
+            `M ${start.x} ${start.y} ` +
+            `L ${elbowX} ${start.y} ` +
+            `L ${elbowX} ${cursor.y} ` +
+            `L ${cursor.x} ${cursor.y}`;
+          return (
+            <svg
+              className="pointer-events-none absolute inset-0 z-20 h-full w-full"
+              aria-hidden="true"
+            >
+              <defs>
+                <marker
+                  id="fk-connect-arrow"
+                  viewBox="0 0 10 10"
+                  refX="8"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0 0 L10 5 L0 10 z" fill={tip} />
+                </marker>
+              </defs>
+              {connectDrag.target && (
+                <rect
+                  x={connectDrag.target.x}
+                  y={connectDrag.target.y}
+                  width={connectDrag.target.w}
+                  height={connectDrag.target.h}
+                  rx={3}
+                  fill={
+                    connectDrag.target.valid ? 'rgb(16 185 129 / 0.14)' : 'rgb(244 63 94 / 0.14)'
+                  }
+                  stroke={tip}
+                  strokeWidth={1.5}
+                />
+              )}
+              <path
+                d={d}
+                fill="none"
+                stroke={tip}
+                strokeWidth={2}
+                strokeLinecap="round"
+                markerEnd="url(#fk-connect-arrow)"
+              />
+              <circle cx={start.x} cy={start.y} r={3.5} fill={tip} />
+            </svg>
+          );
+        })()}
+      {connectNotice && (
+        <div
+          className={
+            'pointer-events-none absolute bottom-12 left-1/2 z-30 -translate-x-1/2 rounded-full px-3 py-1 ' +
+            'text-[12px] font-medium shadow-lg backdrop-blur ' +
+            (connectNotice.tone === 'ok'
+              ? 'border border-emerald-200 bg-emerald-50/95 text-emerald-700 dark:border-emerald-700/50 dark:bg-emerald-900/80 dark:text-emerald-300'
+              : 'border border-rose-200 bg-rose-50/95 text-rose-700 dark:border-rose-700/50 dark:bg-rose-900/80 dark:text-rose-300')
+          }
+          role="status"
+        >
+          {connectNotice.text}
+        </div>
+      )}
+      {noteEditor && (
+        <FieldNoteBubble
+          key={`${noteEditor.table}::${noteEditor.col}`}
+          table={noteEditor.table}
+          col={noteEditor.col}
+          x={noteEditor.x}
+          y={noteEditor.y}
+          initial={fieldNotes[fieldNoteKey(noteEditor.table, noteEditor.col)]?.text ?? ''}
+          updatedAt={fieldNotes[fieldNoteKey(noteEditor.table, noteEditor.col)]?.updatedAt}
+          onSave={(text) => {
+            setFieldNote(noteEditor.table, noteEditor.col, text);
+            setNoteEditor(null);
+          }}
+          onClose={() => setNoteEditor(null)}
+        />
+      )}
+      {selectedEdges.size > 0 && selectedIds.size < 2 && (
+        <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-ink-200 bg-white/90 px-3 py-1 text-[12px] font-medium text-ink-600 shadow-lg backdrop-blur dark:border-inkd-300 dark:bg-inkd-100/90 dark:text-inkd-700">
+          {selectedEdges.size === 1 ? (
+            <code className="font-mono text-[11px] max-w-[320px] truncate">
+              {[...selectedEdges.values()][0]}
+            </code>
+          ) : (
+            <span>已选 {selectedEdges.size} 条连线 · ⇧/⌘ 点击加选</span>
+          )}
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"
+            title={selectedEdges.size === 1 ? '删除这条手动连线' : `删除这 ${selectedEdges.size} 条手动连线`}
+            onClick={deleteSelectedEdges}
+          >
+            <TrashIcon />
+            {selectedEdges.size === 1 ? '删除连线' : `删除 ${selectedEdges.size} 条`}
+          </button>
+          <span className="text-ink-400 dark:text-inkd-500">Esc 取消</span>
+        </div>
+      )}
       {selectedIds.size >= 2 && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-ink-200 bg-white/90 px-3 py-1 text-[12px] font-medium text-ink-600 shadow-lg backdrop-blur dark:border-inkd-300 dark:bg-inkd-100/90 dark:text-inkd-700">
           <span>已选 {selectedIds.size} 张 · 拖动整组移动</span>
@@ -1372,6 +1888,109 @@ export function DiagramCanvas() {
           所有表已隐藏 · 从左下角回收站恢复
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Review-note bubble (评审批注): a small anchored editor for one field's note.
+ * Uncontrolled by the store while typing; commits on 保存 (or ⌘/Ctrl+Enter),
+ * discards on Esc / outside click. Saving empty text clears the note.
+ */
+function FieldNoteBubble({
+  table,
+  col,
+  x,
+  y,
+  initial,
+  updatedAt,
+  onSave,
+  onClose,
+}: {
+  table: string;
+  col: string;
+  x: number;
+  y: number;
+  initial: string;
+  updatedAt?: string;
+  onSave: (text: string) => void;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState(initial);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    const onDown = (e: MouseEvent) => {
+      if (ref.current?.contains(e.target as Node)) return;
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className={
+        'absolute z-30 w-[300px] -translate-x-1/2 rounded-lg border border-ink-200 bg-white/97 p-2 shadow-xl backdrop-blur ' +
+        'dark:border-inkd-300 dark:bg-inkd-100/95'
+      }
+      style={{ left: x, top: y }}
+      role="dialog"
+      aria-label={`${table}.${col} 的评审批注`}
+    >
+      <div className="mb-1 flex items-baseline gap-1 px-0.5">
+        <code className="font-mono text-[11px] text-ink-800 dark:text-inkd-800 truncate">
+          {table}
+          <span className="text-ink-400 dark:text-inkd-500">.{col}</span>
+        </code>
+        <span className="ml-auto shrink-0 text-[9.5px] text-ink-300 dark:text-inkd-500">
+          {updatedAt ? `写于 ${formatNoteTime(updatedAt)}` : '评审批注'}
+        </span>
+      </div>
+      <textarea
+        autoFocus
+        rows={3}
+        value={text}
+        placeholder="写下对这个字段的评审意见（命名 / 类型 / 冗余 / 约束…），随评审报告导出"
+        className={
+          'w-full resize-none rounded border border-ink-200 bg-white px-1.5 py-1 text-[11.5px] leading-snug ' +
+          'text-ink-800 placeholder:text-ink-300 focus:outline-none focus:ring-1 focus:ring-amber-400 ' +
+          'dark:border-inkd-300 dark:bg-inkd-200 dark:text-inkd-800 dark:placeholder:text-inkd-500'
+        }
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onSave(text);
+        }}
+      />
+      <div className="mt-1 flex items-center gap-1.5">
+        <span className="text-[9.5px] text-ink-300 dark:text-inkd-500">⌘↵ 保存 · Esc 取消</span>
+        <span className="ml-auto flex items-center gap-1.5">
+          {initial && (
+            <button
+              type="button"
+              className="h-6 rounded border border-rose-200 px-2 text-[11px] text-rose-600 hover:bg-rose-50 dark:border-rose-700/50 dark:text-rose-400 dark:hover:bg-rose-900/30"
+              onClick={() => onSave('')}
+            >
+              删除批注
+            </button>
+          )}
+          <button
+            type="button"
+            className="h-6 rounded bg-amber-500 px-2.5 text-[11px] font-medium text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500"
+            onClick={() => onSave(text)}
+          >
+            保存
+          </button>
+        </span>
+      </div>
     </div>
   );
 }

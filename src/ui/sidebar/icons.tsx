@@ -110,6 +110,36 @@ export function SectionIconSparklesWand({ size = 14, className }: IconProps = {}
 }
 
 /** Lightbulb — used by 智能提示. */
+/** Chain-link glyph for the 逻辑关联 (business-key link) section. */
+export function SectionIconLink({ size = 14, className }: IconProps = {}) {
+  return (
+    <svg {...baseSvgProps(size, className)}>
+      <path
+        d="M6.5 9.5 9.5 6.5M5 7.8 3.6 9.2a2.6 2.6 0 1 0 3.7 3.7l1.4-1.4M11 8.2l1.4-1.4a2.6 2.6 0 1 0-3.7-3.7L7.3 4.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Pen-with-line glyph for the 手动连线 (manual relation) section. */
+export function SectionIconPen({ size = 14, className }: IconProps = {}) {
+  return (
+    <svg {...baseSvgProps(size, className)}>
+      <path
+        d="m9.8 3 3.2 3.2-6.8 6.8-3.6.4.4-3.6L9.8 3Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M8.4 4.4 11.6 7.6" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
 export function SectionIconLightbulb({ size = 14, className }: IconProps = {}) {
   return (
     <svg {...baseSvgProps(size, className)}>

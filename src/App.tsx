@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Toolbar } from './ui/overlays/Toolbar';
 import { CanvasControls } from './ui/overlays/CanvasControls';
 import { RecycleBin } from './ui/overlays/RecycleBin';
+import { ReviewNotesOverlay } from './ui/overlays/ReviewNotes';
 import { SqlInputDialog } from './ui/overlays/SqlInputDialog';
 import { Sidebar } from './ui/sidebar/Sidebar';
 import { useApp } from './store';
@@ -85,6 +86,7 @@ export default function App() {
         </main>
         {schema && schema.tables.length > 0 && <CanvasControls />}
         {schema && schema.tables.length > 0 && <RecycleBin />}
+        {schema && schema.tables.length > 0 && <ReviewNotesOverlay />}
         <Sidebar collapsed={sidebarCollapsed} />
       </div>
       <SqlInputDialog open={importOpen} onClose={() => setImportOpen(false)} />

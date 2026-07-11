@@ -83,3 +83,23 @@ body {
   color: #111728;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
+
+/*
+ * Connect dots (字段两侧的连线触点): a breathing amber glow so the affordance
+ * reads as "alive" while the row is hovered — the dot itself stays sky-toned,
+ * the halo pulses. Disabled for users preferring reduced motion.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes connect-dot-breathe {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    }
+    50% {
+      box-shadow: 0 0 7px 3px rgba(245, 158, 11, 0.6);
+    }
+  }
+  .connect-dot {
+    animation: connect-dot-breathe 1.8s ease-in-out infinite;
+  }
+}

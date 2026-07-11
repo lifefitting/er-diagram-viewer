@@ -134,6 +134,9 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasState> = (s
     if (tables.length === 0) return;
     set({ flashTables: tables, flashTick: s.flashTick + 1 });
   },
+  flashTable(tableName) {
+    set((s) => ({ flashTables: [tableName], flashTick: s.flashTick + 1 }));
+  },
   clearFlash() {
     set({ flashTables: [] });
   },

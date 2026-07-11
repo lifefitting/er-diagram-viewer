@@ -48,8 +48,13 @@ const ISO_GAP = 60; // gap around the isolated-table grid
 
 /** Per-edge ranking weight inputs. Stronger relations pull endpoints closer. */
 export interface LayoutEdgeMeta {
-  /** 'explicit' (declared in DDL) or 'inferred'. */
-  source: 'explicit' | 'inferred';
+  /** 'explicit' (declared in DDL), 'inferred', or 'manual' (user-added). */
+  source: 'explicit' | 'inferred' | 'manual';
+  /** 'logical' = business-key association: kept in the layout graph (so its
+   *  tables don't fall into the isolated grid) but at a LOW weight regardless
+   *  of source — a manual logical link must not pull like a manual FK.
+   *  Absent = 'fk'. */
+  kind?: 'fk' | 'logical';
   /** Inferred confidence tier; explicit FKs report 'high'. */
   confidence: 'high' | 'medium' | 'low';
   /** Solid = explicit OR user-accepted; dashed = pending. */
@@ -66,8 +71,13 @@ export interface LayoutEdgeMeta {
  * and the table isn't orphaned) but too light to distort the strong skeleton.
  */
 export function layoutEdgeWeight(m: LayoutEdgeMeta): number {
+  // Logical links short-circuit BEFORE the source tiers: even a manual one
+  // must stay light, or a business key spanning domains would fold the
+  // FK-derived ranking into itself.
+  if (m.kind === 'logical') return (m.accepted ? 2 : 0.5) * (m.sameModule ? 1.8 : 1);
   let base: number;
-  if (m.source === 'explicit') base = 16;
+  // Manual FKs are user-declared — as authoritative as explicit ones.
+  if (m.source === 'explicit' || m.source === 'manual') base = 16;
   else if (m.accepted) base = 8;
   else if (m.confidence === 'high') base = 4;
   else if (m.confidence === 'medium') base = 1;
@@ -142,7 +152,8 @@ export function arrangeForPublication(cy: Core): void {
     child: e.source().id(), // FK column holder
     parent: e.target().id(), // referenced table
     weight: layoutEdgeWeight({
-      source: (e.data('meta')?.source as 'explicit' | 'inferred') ?? 'inferred',
+      source: (e.data('meta')?.source as LayoutEdgeMeta['source']) ?? 'inferred',
+      kind: (e.data('kind') as LayoutEdgeMeta['kind']) ?? 'fk',
       confidence: (e.data('confidence') as 'high' | 'medium' | 'low') ?? 'medium',
       accepted: e.data('lineStyle') === 'solid',
       sameModule: e.data('crossModule') === 'no',

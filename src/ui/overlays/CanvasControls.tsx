@@ -244,6 +244,8 @@ function HelpPopover() {
         <HelpRow keys="抓手 / 空格 / 中键">拖拽平移画布</HelpRow>
         <HelpRow keys="拖拽表头">移动卡片（多选时整组移动）</HelpRow>
         <HelpRow keys="⇧ / ⌘ 点击">加选 / 取消单张</HelpRow>
+        <HelpRow keys="拖拽字段触点">悬停字段两侧圆点，拖线到目标字段建外键 / 逻辑关联</HelpRow>
+        <HelpRow keys="点击字段">打开评审批注气泡（随评审报告导出）</HelpRow>
         <HelpRow keys="滚轮 / 双指">平移 · 捏合或 ⌘ 滚轮缩放</HelpRow>
         <HelpRow keys="⌘Z / ⌘⇧Z">撤销 / 重做</HelpRow>
         <HelpRow keys="Esc">取消选择</HelpRow>

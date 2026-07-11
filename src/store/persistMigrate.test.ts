@@ -8,7 +8,7 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
     theme: 'dark',
     sidebarCollapsed: true,
     decisions: { 'a.x->b.y': 'accept' },
-    display: { onlyPk: false, showType: true, showComment: true, showIndex: true, showLowConfidence: false },
+    display: { onlyPk: false, showType: true, showComment: true, showIndex: true, showLowConfidence: false, showLogicalLinks: true, showManualLinks: true },
     collapsed: { a: true },
     tableWidths: { a: 320 },
     deletedTables: { 't:b': true },
@@ -35,6 +35,52 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
   it('drops manualRoutes whose values are not point arrays', () => {
     expect('manualRoutes' in sanitizePersisted({ ...valid, manualRoutes: { k: 'x,y' } })).toBe(false);
     expect('manualRoutes' in sanitizePersisted({ ...valid, manualRoutes: { k: [{ x: 1 }] } })).toBe(false);
+  });
+
+  it('keeps well-formed manualFks and drops malformed ones', () => {
+    const fk = {
+      fromTable: 'check_task_detail',
+      fromColumns: ['task_id'],
+      toTable: 'check_task',
+      toColumns: ['id'],
+      source: 'manual',
+    };
+    expect(sanitizePersisted({ ...valid, manualFks: [fk] }).manualFks).toEqual([fk]);
+    // optional kind: absent and known values pass, junk drops the field
+    expect(sanitizePersisted({ ...valid, manualFks: [{ ...fk, kind: 'logical' }] }).manualFks).toEqual([{ ...fk, kind: 'logical' }]);
+    expect('manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, kind: 'sideways' }] })).toBe(false);
+    // wrong source tag
+    expect('manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, source: 'inferred' }] })).toBe(false);
+    // empty column list / missing table
+    expect('manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, fromColumns: [] }] })).toBe(false);
+    expect('manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, toTable: '' }] })).toBe(false);
+    // not an array
+    expect('manualFks' in sanitizePersisted({ ...valid, manualFks: { 0: fk } })).toBe(false);
+  });
+
+  it('keeps valid fieldNotes (upgrading legacy strings) and drops malformed ones', () => {
+    const note = { text: '建议改枚举', updatedAt: '2026-07-11T10:00:00.000Z' };
+    expect(
+      sanitizePersisted({ ...valid, fieldNotes: { 'orders::status': note } }).fieldNotes,
+    ).toEqual({ 'orders::status': note });
+    // Legacy pre-timestamp snapshot: plain string → wrapped with empty time.
+    expect(
+      sanitizePersisted({ ...valid, fieldNotes: { 'orders::status': '建议改枚举' } }).fieldNotes,
+    ).toEqual({ 'orders::status': { text: '建议改枚举', updatedAt: '' } });
+    expect('fieldNotes' in sanitizePersisted({ ...valid, fieldNotes: { k: '' } })).toBe(false);
+    expect('fieldNotes' in sanitizePersisted({ ...valid, fieldNotes: { k: 3 } })).toBe(false);
+    expect('fieldNotes' in sanitizePersisted({ ...valid, fieldNotes: { k: { text: '' } } })).toBe(
+      false,
+    );
+  });
+
+  it('keeps a valid logicalKeys list and drops malformed ones', () => {
+    expect(sanitizePersisted({ ...valid, logicalKeys: ['out_trade_no'] }).logicalKeys).toEqual([
+      'out_trade_no',
+    ]);
+    expect(sanitizePersisted({ ...valid, logicalKeys: [] }).logicalKeys).toEqual([]);
+    expect('logicalKeys' in sanitizePersisted({ ...valid, logicalKeys: ['a', 3] })).toBe(false);
+    expect('logicalKeys' in sanitizePersisted({ ...valid, logicalKeys: 'out_trade_no' })).toBe(false);
   });
 
   it('drops an invalid theme / palette / partial display', () => {

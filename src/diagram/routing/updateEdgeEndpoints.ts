@@ -195,16 +195,19 @@ export function updateEdgeEndpoints(
     let obstaclesUsed: Rect[] | null = null;
 
     if (src.id() === tgt.id()) {
-      // Self-loop: both endpoints on the right, U-shape out and back. The U
-      // depth is a visual signature — excluded from the track post-pass.
+      // Self-loop: both endpoints on the SAME side (the side the user started
+      // the drag from — `loopSide` edge data; inferred loops default right),
+      // U-shape out and back, docked at the two field rows. The U depth is a
+      // visual signature — excluded from the track post-pass.
       movable = false;
-      srcOff = computeEndpointOffset(srcY, srcCollapsed, srcW, srcH, 'right');
-      tgtOff = computeEndpointOffset(tgtY, tgtCollapsed, tgtW, tgtH, 'right');
+      const side: 'left' | 'right' = e.data('loopSide') === 'left' ? 'left' : 'right';
+      srcOff = computeEndpointOffset(srcY, srcCollapsed, srcW, srcH, side);
+      tgtOff = computeEndpointOffset(tgtY, tgtCollapsed, tgtW, tgtH, side);
       const sx = srcPos.x + srcOff.x;
       const sy = srcPos.y + srcOff.y;
       const tx = tgtPos.x + tgtOff.x;
       const ty = tgtPos.y + tgtOff.y;
-      const outerX = Math.max(sx, tx) + 36;
+      const outerX = side === 'right' ? Math.max(sx, tx) + 36 : Math.min(sx, tx) - 36;
       pts = [
         { x: sx, y: sy },
         { x: outerX, y: sy },
@@ -299,9 +302,18 @@ export function updateEdgeEndpoints(
             pts = direct;
           } else if (liveRoute) {
             // Interactive pass: route around the cards from the live ports so the
-            // connector follows the dragged node. A live-midpoint H-V-H is the
-            // last resort if even the detour is boxed in (still node-relative).
-            const detour = detourRoute({ x: sx, y: sy }, { x: tx, y: ty }, obstacles);
+            // connector follows the dragged node. The endpoint cards + exit
+            // directions let the router keep a horizontal stub at each field row
+            // and stay clear of the cards' own borders — without them a detour
+            // may drop vertically flush along a card edge, hiding which field it
+            // docks to. A live-midpoint H-V-H is the last resort if even the
+            // detour is boxed in (still node-relative).
+            const detour = detourRoute({ x: sx, y: sy }, { x: tx, y: ty }, obstacles, {
+              srcRect: rectById.get(src.id()),
+              tgtRect: rectById.get(tgt.id()),
+              srcDir: srcSide === 'right' ? 1 : -1,
+              tgtDir: tgtSide === 'right' ? 1 : -1,
+            });
             pts = detour ?? orthogonalize([{ x: sx, y: sy }, { x: tx, y: ty }]);
           } else {
             // Static (layout/export) pass: dock to dagre's channel waypoints.

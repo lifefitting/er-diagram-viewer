@@ -39,6 +39,7 @@ CREATE TABLE orders (
   id BIGINT NOT NULL AUTO_INCREMENT,
   user_id BIGINT NOT NULL COMMENT 'Buyer',
   shipping_address_id BIGINT COMMENT 'Where to ship; null = digital order',
+  out_trade_no VARCHAR(64) COMMENT 'External trade number shared with the payment service (no physical FK)',
   status VARCHAR(32) NOT NULL COMMENT 'pending / paid / shipped / refunded',
   total_cents INT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -61,17 +62,20 @@ CREATE TABLE order_items (
 CREATE TABLE payments (
   id BIGINT NOT NULL AUTO_INCREMENT,
   order_id BIGINT NOT NULL,
+  out_trade_no VARCHAR(64) COMMENT 'External trade number — the sharded services join on this business key',
   amount_cents INT NOT NULL,
   method VARCHAR(32),
   paid_at DATETIME,
   PRIMARY KEY (id),
-  UNIQUE KEY uniq_order (order_id)
+  UNIQUE KEY uniq_order (order_id),
+  UNIQUE KEY uniq_out_trade_no (out_trade_no)
 );
 
 CREATE TABLE payment_refunds (
   id BIGINT NOT NULL AUTO_INCREMENT,
   payment_id BIGINT NOT NULL,
   order_ref BIGINT COMMENT 'Originating order — named with the _ref suffix instead of _id',
+  out_trade_no VARCHAR(64) COMMENT 'External trade number of the refunded payment',
   amount_cents INT NOT NULL,
   reason VARCHAR(200),
   refunded_at DATETIME,

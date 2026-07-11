@@ -5,12 +5,16 @@ import { fkKey } from '../../infer/inferForeignKeys';
 import { AccordionSection } from './AccordionSection';
 import { DisplayControls } from './DisplayControls';
 import { InferencePanel } from './InferencePanel';
+import { LogicalPanel } from './LogicalPanel';
+import { ManualFkPanel } from './ManualFkPanel';
 import { ModulesPanel, ModulesPanelHeaderActions } from './ModulesPanel';
 import {
   CollapseLeftIcon,
   SectionIconBlocks,
   SectionIconEye,
   SectionIconLightbulb,
+  SectionIconLink,
+  SectionIconPen,
   SectionIconSparklesWand,
   SectionIconWarning,
   SparklesIcon,
@@ -34,6 +38,28 @@ import { GroupHeading } from './GroupHeading';
  * to its natural content height and only shrinks when the panel hits its
  * max-height cap.
  */
+/** 隐藏连线/显示连线 toggle in the 逻辑关联 / 手动连线 section headers —
+ *  flips the whole category on the canvas at once (compare the physical-only
+ *  picture vs the full one) without touching any decision. */
+function EdgeVisibilityToggle({ field }: { field: 'showLogicalLinks' | 'showManualLinks' }) {
+  const on = useApp((s) => s.display[field]);
+  const toggleDisplay = useApp((s) => s.toggleDisplay);
+  return (
+    <button
+      className={clsx(
+        'text-[10.5px] px-1.5 py-0.5 rounded transition-colors',
+        on
+          ? 'text-ink-500 dark:text-inkd-600 hover:text-ink-800 dark:hover:text-inkd-800 hover:bg-ink-50 dark:hover:bg-inkd-200'
+          : 'text-amber-700 bg-amber-50 hover:bg-amber-100 dark:text-amber-300 dark:bg-amber-900/30 dark:hover:bg-amber-900/50',
+      )}
+      onClick={() => toggleDisplay(field)}
+      title={on ? '在画布上隐藏这一类连线（决策不受影响）' : '重新显示这一类连线'}
+    >
+      {on ? '隐藏连线' : '显示连线'}
+    </button>
+  );
+}
+
 export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const toggleSidebar = useApp((s) => s.toggleSidebar);
   const moduleCount = useApp((s) => s.modules.ordered.length);
@@ -43,19 +69,36 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const warnings = useApp((s) => s.schema?.warnings ?? []);
   const notices = useApp((s) => s.schema?.notices ?? []);
   const display = useApp((s) => s.display);
+  const manualCount = useApp((s) => s.manualFks.length);
+  const logicalKeyCount = useApp((s) => s.logicalKeys.length);
+
+  // FK candidates vs logical (business-key) candidates are SEPARATE sections:
+  // an FK candidate carries a confidence tier and a decision workflow; a
+  // logical link is user-triggered (scan → pick keys) with no tiers.
+  const { fkInferred, logicalCount } = useMemo(() => {
+    let logical = 0;
+    const fk = inferred.filter((f) => {
+      if (f.kind === 'logical') {
+        logical++;
+        return false;
+      }
+      return true;
+    });
+    return { fkInferred: fk, logicalCount: logical };
+  }, [inferred]);
 
   // Subtitle for "推断的外键": mirror what the visible FK candidates show
   // (low-confidence ones are hidden unless the user toggles them on). The
   // collapsed-state line then matches what the user actually sees once they
   // expand the section.
   const inferenceSubtitle = useMemo(() => {
-    if (inferred.length === 0) return '尚无推断结果';
-    const visible = inferred.filter((fk) => fk.confidence !== 'low' || showLow);
+    if (fkInferred.length === 0) return '尚无推断结果';
+    const visible = fkInferred.filter((fk) => fk.confidence !== 'low' || showLow);
     const decided = visible.reduce((n, fk) => (decisions[fkKey(fk)] ? n + 1 : n), 0);
     const pending = visible.length - decided;
     if (pending === 0) return `${decided} 条候选已全部决策`;
     return `${pending} 待定 · ${decided} 已决策`;
-  }, [inferred, decisions, showLow]);
+  }, [fkInferred, decisions, showLow]);
 
   const displaySubtitle = useMemo(() => {
     if (display.onlyPk) return '仅主键模式';
@@ -67,7 +110,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
     return on.join(' · ');
   }, [display]);
 
-  const inferredCount = inferred.length;
+  const inferredCount = fkInferred.length;
 
   if (collapsed) {
     return <CollapsedSidebarRail onExpand={toggleSidebar} />;
@@ -166,6 +209,34 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
           defaultOpen={inferredCount > 0}
         >
           <InferencePanel />
+        </AccordionSection>
+
+        <AccordionSection
+          title="逻辑关联"
+          subtitle={
+            logicalCount > 0
+              ? `${logicalCount} 条业务键关联`
+              : logicalKeyCount > 0
+                ? `已选 ${logicalKeyCount} 个业务键`
+                : '业务键关联 · 按需扫描'
+          }
+          icon={<SectionIconLink />}
+          count={logicalCount || undefined}
+          defaultOpen={logicalCount > 0}
+          actions={logicalCount > 0 ? <EdgeVisibilityToggle field="showLogicalLinks" /> : undefined}
+        >
+          <LogicalPanel />
+        </AccordionSection>
+
+        <AccordionSection
+          title="手动连线"
+          subtitle={manualCount > 0 ? '类型可在此批量调整' : '画布拖线或表单添加'}
+          icon={<SectionIconPen />}
+          count={manualCount || undefined}
+          defaultOpen={false}
+          actions={manualCount > 0 ? <EdgeVisibilityToggle field="showManualLinks" /> : undefined}
+        >
+          <ManualFkPanel />
         </AccordionSection>
 
         {notices.length > 0 && (

@@ -21,6 +21,8 @@ const DISPLAY: DisplayOptions = {
   showComment: true,
   showIndex: true,
   showLowConfidence: false,
+  showLogicalLinks: true,
+  showManualLinks: true,
 };
 
 function buildFixture(): { cy: Core; tableById: Map<string, Table> } {

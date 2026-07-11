@@ -34,7 +34,23 @@ export interface ForeignKey {
   toTable: string;
   toColumns: string[];
   constraintName?: string;
-  source: 'explicit' | 'inferred';
+  /** 'explicit' = declared in the DDL; 'inferred' = produced by the inference
+   *  engine; 'manual' = added by the user in the inference panel (treated as
+   *  authoritative, like explicit — always drawn solid, never gated by
+   *  decisions). */
+  source: 'explicit' | 'inferred' | 'manual';
+  /** 'fk' (default when absent) = physical foreign-key semantics; 'logical' =
+   *  a business-key association (e.g. two sharded services joined by
+   *  `out_trade_no`) with NO physical constraint: rendered undirected
+   *  (dotted, circle endpoints) and exported as a SQL comment instead of an
+   *  ALTER TABLE. Logical FKs are ALWAYS stored with endpoints ordered by
+   *  (table, column) — see `canonicalizeLogicalFk` — so the reversed form of a
+   *  link can never exist and its `canonicalFkKey` is direction-stable. */
+  kind?: 'fk' | 'logical';
+  /** Manual (hand-drawn) relations only: which connect dot the drag STARTED
+   *  from. Drives which side a same-table loop bulges out of, and is worth
+   *  persisting — it captures the user's spatial intent. */
+  drawSide?: 'left' | 'right';
   confidence?: 'high' | 'medium' | 'low';
   reason?: string;
 }

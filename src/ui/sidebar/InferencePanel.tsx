@@ -41,13 +41,19 @@ export function InferencePanel() {
     low: false,
   });
 
+  // FK candidates only — logical (business-key) links live in their own
+  // sidebar section (LogicalPanel): they answer a different review question
+  // and are user-triggered, so they must not join the FK progress/batch flow.
   const groups = useMemo(() => {
     const g: Record<Confidence, InferredFK[]> = { high: [], medium: [], low: [] };
-    for (const fk of inferred) g[fk.confidence].push(fk);
+    for (const fk of inferred) {
+      if (fk.kind !== 'logical') g[fk.confidence].push(fk);
+    }
     return g;
   }, [inferred]);
+  const fkTotal = groups.high.length + groups.medium.length + groups.low.length;
 
-  if (inferred.length === 0) {
+  if (fkTotal === 0) {
     return (
       <div className="px-3 py-2 text-[11px] text-ink-400 dark:text-inkd-500">
         尚未推断出隐式外键。
@@ -150,7 +156,7 @@ export function InferencePanel() {
       </div>
 
       <div className="px-3 py-1.5 border-t border-ink-100 dark:border-inkd-300 flex items-center justify-between text-[11px] text-ink-400 dark:text-inkd-500">
-        <span className="tabular-nums">共 {inferred.length} 条候选</span>
+        <span className="tabular-nums">共 {fkTotal} 条候选</span>
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input
             type="checkbox"
@@ -255,18 +261,21 @@ interface FkRowProps {
   fk: InferredFK;
   decision: 'accept' | 'reject' | undefined;
   bar: string;
+  /** Logical (business-key) rows render an undirected `~` separator. */
+  undirected?: boolean;
   onAccept: () => void;
   onReject: () => void;
   onClear: () => void;
 }
 
-function FkRow({ fk, decision, bar, onAccept, onReject, onClear }: FkRowProps) {
+export function FkRow({ fk, decision, bar, undirected = false, onAccept, onReject, onClear }: FkRowProps) {
   const accepted = decision === 'accept';
   const rejected = decision === 'reject';
   const tokens = useMemo(() => tokenizeReason(fk.reason), [fk.reason]);
+  const sep = undirected ? '~' : '→';
   // The full FK path goes into a `title` so hovering shows the untruncated
   // string even when the rendered text is ellipsized for long names.
-  const pathStr = `${fk.fromTable}.${fk.fromColumns.join(',')} → ${fk.toTable}.${fk.toColumns.join(',')}`;
+  const pathStr = `${fk.fromTable}.${fk.fromColumns.join(',')} ${sep} ${fk.toTable}.${fk.toColumns.join(',')}`;
 
   return (
     <li
@@ -300,7 +309,7 @@ function FkRow({ fk, decision, bar, onAccept, onReject, onClear }: FkRowProps) {
         >
           <span className="text-ink-800 dark:text-inkd-800">{fk.fromTable}</span>
           <span className="text-ink-500 dark:text-inkd-600">.{fk.fromColumns.join(',')}</span>
-          <span className="text-ink-300 dark:text-inkd-500 mx-0.5">→</span>
+          <span className="text-ink-300 dark:text-inkd-500 mx-0.5">{sep}</span>
           <span className="text-ink-800 dark:text-inkd-800">{fk.toTable}</span>
           <span className="text-ink-500 dark:text-inkd-600">.{fk.toColumns.join(',')}</span>
         </code>
@@ -394,6 +403,23 @@ function tokenizeReason(reason: string): ReasonToken[] {
       tone: 'good',
     });
   }
+  // Business-key (logical link) dimension.
+  if (/shared business key/i.test(reason)) {
+    out.push({
+      id: 'biz-key',
+      text: '业务键',
+      title: '多张表共享同名业务键列（无物理外键）',
+      tone: 'info',
+    });
+    if (/unique on .* \(hub\)/i.test(reason)) {
+      out.push({
+        id: 'biz-hub',
+        text: '唯一侧',
+        title: '业务键在中心表上有唯一索引，可信度更高',
+        tone: 'good',
+      });
+    }
+  }
   // Index dimension.
   if (/source column indexed/i.test(reason) || /indexed=true/i.test(reason)) {
     out.push({
@@ -421,7 +447,7 @@ function tokenizeReason(reason: string): ReasonToken[] {
 // Tiny icon/button components
 // -----------------------------------------------------------------------------
 
-function Chevron({ open }: { open: boolean }) {
+export function Chevron({ open }: { open: boolean }) {
   return (
     <svg
       width="10"
