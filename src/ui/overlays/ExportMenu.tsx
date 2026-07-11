@@ -28,6 +28,11 @@ function resolveExportTheme(pref: ThemePreference): ExportTheme {
 export function ExportMenu() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<null | 'png' | 'svg'>(null);
+  // 评审报告 options sub-panel: whether to include the engine's candidate
+  // lists (a reviewer may want a "facts + opinions only" report).
+  const [reportOptsOpen, setReportOptsOpen] = useState(false);
+  const [incFkCandidates, setIncFkCandidates] = useState(true);
+  const [incLogicalCandidates, setIncLogicalCandidates] = useState(true);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const rawSchema = useApp((s) => s.schema);
   const modules = useApp((s) => s.modules);
@@ -155,12 +160,17 @@ export function ExportMenu() {
       manualFks,
       deletedTableNames,
       fieldNotes,
+      include: {
+        inferredFkCandidates: incFkCandidates,
+        logicalCandidates: incLogicalCandidates,
+      },
     });
     download(
       'data:text/markdown;charset=utf-8,' + encodeURIComponent(md),
       `er-review-report-${ts()}.md`,
     );
     setOpen(false);
+    setReportOptsOpen(false);
   };
 
   const exportSpecDoc = () => {
@@ -226,9 +236,40 @@ export function ExportMenu() {
           <MenuItem
             icon={<ReportIcon />}
             label="评审报告"
-            hint=".md"
-            onClick={exportReport}
+            hint={reportOptsOpen ? '选项 ▴' : '.md ▾'}
+            onClick={() => setReportOptsOpen((v) => !v)}
           />
+          {reportOptsOpen && (
+            <div className="mx-2 mb-1 rounded-md border border-ink-100 bg-ink-50/50 px-2 py-1.5 text-[11px] dark:border-inkd-300 dark:bg-inkd-200/50">
+              <label className="flex cursor-pointer items-center gap-1.5 py-0.5 text-ink-600 dark:text-inkd-700">
+                <input
+                  type="checkbox"
+                  className="accent-ink-700 dark:accent-inkd-700"
+                  checked={incFkCandidates}
+                  onChange={() => setIncFkCandidates((v) => !v)}
+                />
+                包含推断外键候选
+              </label>
+              <label className="flex cursor-pointer items-center gap-1.5 py-0.5 text-ink-600 dark:text-inkd-700">
+                <input
+                  type="checkbox"
+                  className="accent-ink-700 dark:accent-inkd-700"
+                  checked={incLogicalCandidates}
+                  onChange={() => setIncLogicalCandidates((v) => !v)}
+                />
+                包含逻辑关联候选（手动连线始终包含）
+              </label>
+              <div className="mt-1 flex justify-end">
+                <button
+                  type="button"
+                  className="h-6 rounded bg-ink-800 px-2.5 text-[11px] font-medium text-white hover:bg-ink-900 dark:bg-inkd-700 dark:hover:bg-inkd-800"
+                  onClick={exportReport}
+                >
+                  导出报告
+                </button>
+              </div>
+            </div>
+          )}
           <MenuItem
             icon={<SpecIcon />}
             label="数据库说明文档"

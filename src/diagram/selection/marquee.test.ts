@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { NodePos } from '../types';
-import { normalizeRect, rectsIntersect, nodesInMarquee } from './marquee';
+import { normalizeRect, rectsIntersect, nodesInMarquee, polylineIntersectsRect } from './marquee';
 
 /** Minimal NodePos: nodesInMarquee only reads id/x/y/w/h. */
 function pos(id: string, x: number, y: number, w: number, h: number): NodePos {
@@ -65,5 +65,34 @@ describe('nodesInMarquee', () => {
 
   it('returns empty when the box misses everything', () => {
     expect(nodesInMarquee(nodes, { x: 400, y: 400, w: 10, h: 10 })).toEqual([]);
+  });
+});
+
+describe('polylineIntersectsRect (连线框选)', () => {
+  const box = { x: 100, y: 100, w: 100, h: 100 };
+
+  it('vertex inside the box counts', () => {
+    expect(polylineIntersectsRect([{ x: 0, y: 0 }, { x: 150, y: 150 }], box)).toBe(true);
+  });
+
+  it('segment sweeping straight through counts (no vertex inside)', () => {
+    expect(polylineIntersectsRect([{ x: 0, y: 150 }, { x: 300, y: 150 }], box)).toBe(true);
+  });
+
+  it('polyline entirely outside does not count', () => {
+    expect(
+      polylineIntersectsRect(
+        [
+          { x: 0, y: 0 },
+          { x: 50, y: 0 },
+          { x: 50, y: 300 },
+        ],
+        box,
+      ),
+    ).toBe(false);
+  });
+
+  it('grazing the box edge counts (touch = selected)', () => {
+    expect(polylineIntersectsRect([{ x: 100, y: 0 }, { x: 100, y: 300 }], box)).toBe(true);
   });
 });

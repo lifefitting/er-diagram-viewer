@@ -22,6 +22,15 @@ export interface ReportInput {
   /** Field-level review annotations, keyed `table::column` (fieldNoteKey);
    *  each carries the text and WHEN it was written. */
   fieldNotes?: Record<string, { text: string; updatedAt: string }>;
+  /** Section toggles (export dialog): a reviewer may want a "facts + opinions
+   *  only" report without the engine's candidate lists. Both default true. */
+  include?: {
+    /** 推断外键候选 section (accepted/pending/rejected engine candidates). */
+    inferredFkCandidates?: boolean;
+    /** Engine-scanned logical-link candidates (manual logical links are the
+     *  user's own assertions and are always listed). */
+    logicalCandidates?: boolean;
+  };
   /** Injectable for deterministic tests. */
   generatedAt?: Date;
 }
@@ -29,6 +38,8 @@ export interface ReportInput {
 export function buildReviewReport(input: ReportInput): string {
   const { schema, inferred, decisions, manualFks, deletedTableNames } = input;
   const fieldNotes = input.fieldNotes ?? {};
+  const includeFkCandidates = input.include?.inferredFkCandidates ?? true;
+  const includeLogicalCandidates = input.include?.logicalCandidates ?? true;
   const when = input.generatedAt ?? new Date();
 
   const hiddenLower = new Set(deletedTableNames.map((n) => n.toLowerCase()));
@@ -56,10 +67,16 @@ export function buildReviewReport(input: ReportInput): string {
   lines.push('');
   lines.push(`- 生成时间：${formatDate(when)}`);
   lines.push(`- 表：${schema.tables.length} 张`);
-  lines.push(
-    `- 关系：显式外键 ${explicit.length} · 推断外键候选 ${fkCandidates.length} · ` +
-      `逻辑关联候选 ${logicalCandidates.length} · 手动添加 ${manualVisible.length}`,
-  );
+  const summaryParts = [`显式外键 ${explicit.length}`];
+  if (includeFkCandidates) summaryParts.push(`推断外键候选 ${fkCandidates.length}`);
+  if (includeLogicalCandidates) summaryParts.push(`逻辑关联候选 ${logicalCandidates.length}`);
+  summaryParts.push(`手动添加 ${manualVisible.length}`);
+  lines.push(`- 关系：${summaryParts.join(' · ')}`);
+  const omitted = [
+    !includeFkCandidates ? '推断外键候选' : '',
+    !includeLogicalCandidates ? '逻辑关联候选' : '',
+  ].filter(Boolean);
+  if (omitted.length) lines.push(`- 本报告按导出选项省略：${omitted.join('、')}`);
   lines.push('');
 
   lines.push('## 物理外键（DDL 显式声明）');
@@ -70,21 +87,24 @@ export function buildReviewReport(input: ReportInput): string {
   }
   lines.push('');
 
-  lines.push('## 推断外键候选');
-  lines.push('');
-  if (fkCandidates.length === 0) lines.push('（无）');
-  for (const fk of fkCandidates) {
-    lines.push(
-      `- [${stateLabel(fk)}] ${path(fk, '→')} · 置信度 ${fk.confidence}` +
-        (fk.reason ? ` · ${fk.reason}` : ''),
-    );
+  if (includeFkCandidates) {
+    lines.push('## 推断外键候选');
+    lines.push('');
+    if (fkCandidates.length === 0) lines.push('（无）');
+    for (const fk of fkCandidates) {
+      lines.push(
+        `- [${stateLabel(fk)}] ${path(fk, '→')} · 置信度 ${fk.confidence}` +
+          (fk.reason ? ` · ${fk.reason}` : ''),
+      );
+    }
+    lines.push('');
   }
-  lines.push('');
 
   lines.push('## 逻辑关联（业务键，无物理约束）');
   lines.push('');
-  if (logicalCandidates.length === 0 && manualLogical.length === 0) lines.push('（无）');
-  for (const fk of logicalCandidates) {
+  const logicalShown = includeLogicalCandidates ? logicalCandidates : [];
+  if (logicalShown.length === 0 && manualLogical.length === 0) lines.push('（无）');
+  for (const fk of logicalShown) {
     lines.push(
       `- [${stateLabel(fk)}] ${path(fk, '~')} · 置信度 ${fk.confidence}` +
         (fk.reason ? ` · ${fk.reason}` : ''),

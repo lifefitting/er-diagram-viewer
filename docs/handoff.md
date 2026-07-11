@@ -2,7 +2,9 @@
 
 > 面向：接手本仓库的开发者 / 下一次开发会话。
 > 目标：10 分钟内了解项目定位、当前状态、如何跑起来、改动热区与已知坑。
-> 更新时间：2026-07-11（基于 v0.3.0 之后的未发布工作区）。
+> 更新时间：2026-07-11（v0.3.1 已发布 + 发布后一轮改进，见 §4）。
+> 本文档的角色：**每轮工作完成后更新**——记录做了什么、当前状态、下一次如何接手；
+> 「接下来做什么」看 [roadmap.md](roadmap.md)。两者都放在 docs/ 下维护。
 
 ---
 
@@ -96,9 +98,9 @@ SQL 文本 ──parseSql──▶ Schema ──mergeShardedTables──▶ 合�
 
 ## 5. 已知问题与有意延期项
 
-- **[TODO-fix-bugs.zh-CN.md](TODO-fix-bugs.zh-CN.md)**：2 项 P2 布线债务
-  （`liveRoute` 双路由器统一、side-bracket 泛化——标注"大改，先截图对比再动"）
-  + 7 项 P3 延期（附延期理由）。文档中"174 测试"为旧数字，现为 262。
+- **布线债务**（原 TODO-fix-bugs 文件已删除）：「路由统一」经复核**决定不做**
+  （理由与注意事项见 roadmap 4.3）；side-bracket 泛化仍待做（roadmap 4.3）。
+  原 7 项 P3 延期清理项已随文件废弃（收益/风险比不划算，不再跟踪）。
 - **大 schema 无性能防护**：`runPipeline` 全同步，几百表会冻结主线程（roadmap 4.2）。
 - **解析缺口**：`ALTER ADD COLUMN` 丢列、PG `COMMENT ON` 丢注释、跨 schema 同名表
   串扰（roadmap 4.1，前两项建议尽早修）。
@@ -108,6 +110,22 @@ SQL 文本 ──parseSql──▶ Schema ──mergeShardedTables──▶ 合�
   exhaustive-deps、其余同类）；CI 不因 warning 失败。
 - 同表回环固定从 `drawSide` 侧鼓出；若两字段行都被折叠（onlyPk），端点回退到卡中心。
 
+## 5.5 v0.3.1 发布后的一轮改进（本轮，未发版）
+
+- 拖线预览恢复为贝塞尔曲线（成形仍是折线）——「过程平滑、结果规整」；
+- **框选纳入手动连线**：一次框选只产生一种选择——碰到任何卡片即为表选择，
+  一张卡都没碰到才 rubber-band 连线（touch=selected，与表同语义，纯函数
+  `polylineIntersectsRect`）；Delete 有选中连线时只删连线、绝不动表；
+- **评审报告导出选项**：导出菜单二级面板可勾选是否包含推断外键候选 /
+  逻辑关联候选（手动连线始终包含）；
+- **Landing 重写**：口径转向「数据库设计评审工作台」（title/meta/hero/CTA）、
+  新增横向版本时间轴（v0.1.0→v0.3.1）、对比表扩展 5 个评审维度；
+- **单文件底线复核通过**：`bun run build:single` 产物 874 KB，无外部引用，
+  `file://` 直开完整可用（渲染/推断/批注/浮层/sessionStorage 全部实测正常）；
+  这是每次发版前必须复核的底线（验证方法：构建后用浏览器直接打开
+  dist-single/er-diagram-viewer.html，跑一遍导入→批注→导出）；
+- TODO-fix-bugs 两个文件删除，roadmap/handoff 移入 docs/。
+
 ## 6. 开发约定
 
 - **文档同步**：功能性改动同时更新 `CHANGELOG.md`（中文，Keep a Changelog 风格）
@@ -116,6 +134,10 @@ SQL 文本 ──parseSql──▶ Schema ──mergeShardedTables──▶ 合�
   新推断规则/注释路径时应扩展，保证首屏可人工验证。
 - **格式化**：`bun run format` 会重排全仓库——只格式化你改的文件。
 - **提交**：不要在 commit message 加任何 AI 署名 trailer（仓主全局约定）。
+- **分支流程**：**只推特性分支、不本地合并 main**——PR 由仓主创建与合并
+  （协作者无合并权限）。发版 tag 由仓主在合并后打。
+- **单文件底线**：任何改动不得破坏「零服务器、单文件可运行」；发版前必须
+  `bun run build:single` + `file://` 直开验证。
 - 新增持久化字段 → 见上文不变量 2 的四件套。
 
 ## 7. 从哪里继续

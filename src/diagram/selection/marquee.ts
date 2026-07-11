@@ -43,3 +43,58 @@ export function nodesInMarquee(positions: NodePos[], box: Rect): string[] {
   }
   return ids;
 }
+
+/**
+ * Does an orthogonal polyline (an edge's route, in the SAME viewport space as
+ * the box) touch the marquee rect? True when any vertex falls inside OR any
+ * segment crosses the box — so a long straight connector swept by a thin
+ * marquee still counts even though neither endpoint is inside. Used to include
+ * hand-drawn relations in rubber-band selection.
+ */
+export function polylineIntersectsRect(pts: Array<{ x: number; y: number }>, box: Rect): boolean {
+  const x2 = box.x + box.w;
+  const y2 = box.y + box.h;
+  const inside = (p: { x: number; y: number }) =>
+    p.x >= box.x && p.x <= x2 && p.y >= box.y && p.y <= y2;
+  for (const p of pts) if (inside(p)) return true;
+  // Liang-Barsky segment/rect clip for each consecutive pair.
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    let t0 = 0;
+    let t1 = 1;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    let ok = true;
+    for (const [p, q] of [
+      [-dx, a.x - box.x],
+      [dx, x2 - a.x],
+      [-dy, a.y - box.y],
+      [dy, y2 - a.y],
+    ] as Array<[number, number]>) {
+      if (p === 0) {
+        if (q < 0) {
+          ok = false;
+          break;
+        }
+        continue;
+      }
+      const t = q / p;
+      if (p < 0) {
+        if (t > t1) {
+          ok = false;
+          break;
+        }
+        if (t > t0) t0 = t;
+      } else {
+        if (t < t0) {
+          ok = false;
+          break;
+        }
+        if (t < t1) t1 = t;
+      }
+    }
+    if (ok && t0 <= t1) return true;
+  }
+  return false;
+}

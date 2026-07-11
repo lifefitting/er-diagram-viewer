@@ -44,7 +44,12 @@ import {
 } from './routing/channelRoute';
 import { deriveFocusSelection, deriveSearchSelection } from './selection/deriveSelection';
 import { resolveDragGroup, toggleSelected } from './selection/dragGroup';
-import { normalizeRect, nodesInMarquee, type Rect } from './selection/marquee';
+import {
+  normalizeRect,
+  nodesInMarquee,
+  polylineIntersectsRect,
+  type Rect,
+} from './selection/marquee';
 import { TrashIcon } from '../ui/overlays/icons';
 import { useResolvedTheme } from '../ui/theme/useApplyTheme';
 
@@ -842,6 +847,9 @@ export function DiagramCanvas() {
         // Otherwise recycle-bin the selected tables (hide; SQL untouched),
         // clearing the selection synchronously so the pill doesn't go stale.
         e.preventDefault();
+        // Edge selection takes strict priority: deleting relations must never
+        // recycle-bin tables (and table deletion hides its relations anyway,
+        // so the two selections are separate behaviours by design).
         if (selectedEdgesRef.current.size > 0) {
           const s = useApp.getState();
           for (const fkKey of selectedEdgesRef.current.keys()) {
@@ -1340,11 +1348,35 @@ export function DiagramCanvas() {
     const anchor = { x: startClient.x - rect.left, y: startClient.y - rect.top };
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     const base = additive ? new Set(selectedIds) : new Set<string>();
+    const baseEdges = additive ? new Map(selectedEdgesRef.current) : new Map<string, string>();
     // `positions` is stable for the duration of a marquee (no pan/zoom/node move
     // happens while the button is down), so the captured array is safe to read.
     const snapshot = positions;
+    // Manual edges snapshotted as viewport-space polylines — the marquee
+    // rubber-bands them with the SAME touch-= -selected semantics as cards.
+    const pan = cy.pan();
+    const zoom = cy.zoom();
+    const edgeSnapshot: Array<{ fkKey: string; label: string; pts: Pt[] }> = [];
+    cy.edges().forEach((ed) => {
+      const meta = ed.data('meta');
+      if (meta?.source !== 'manual') return;
+      const pts = routeToPoints(ed.data('routePoints') as string).map((p) => ({
+        x: p.x * zoom + pan.x,
+        y: p.y * zoom + pan.y,
+      }));
+      if (pts.length < 2) return;
+      const srcName = (ed.source().data('rawName') as string) ?? '';
+      const tgtName = (ed.target().data('rawName') as string) ?? '';
+      const sep = meta.kind === 'logical' ? '~' : '→';
+      edgeSnapshot.push({
+        fkKey: ed.data('fkKey') as string,
+        label: `${srcName}.${meta.fromColumns.join(',')} ${sep} ${tgtName}.${meta.toColumns.join(',')}`,
+        pts,
+      });
+    });
     let started = false;
     let lastKey = '';
+    let lastEdgeKey = '';
 
     const onMove = (mv: MouseEvent) => {
       const box = normalizeRect(anchor, { x: mv.clientX - rect.left, y: mv.clientY - rect.top });
@@ -1357,13 +1389,37 @@ export function DiagramCanvas() {
         setFocusId(null);
       }
       setMarquee(box);
+      // ONE marquee produces ONE kind of selection: touching any card makes it
+      // a TABLE selection (deleting tables hides their relations anyway);
+      // only a marquee that touches no card at all rubber-bands the
+      // hand-drawn relations — same touch-=-selected feel, no ambiguity.
       const hit = nodesInMarquee(snapshot, box);
-      const key = hit.join(',');
-      if (key === lastKey) return;
-      lastKey = key;
-      const next = new Set(base);
-      for (const id of hit) next.add(id);
-      setSelectedIds(next);
+      if (hit.length > 0) {
+        const key = hit.join(',');
+        if (key !== lastKey) {
+          lastKey = key;
+          const next = new Set(base);
+          for (const id of hit) next.add(id);
+          setSelectedIds(next);
+        }
+        if (lastEdgeKey !== '') {
+          lastEdgeKey = '';
+          setSelectedEdges(new Map(baseEdges));
+        }
+        return;
+      }
+      if (lastKey !== '') {
+        lastKey = '';
+        setSelectedIds(new Set(base));
+      }
+      const hitEdges = edgeSnapshot.filter((en) => polylineIntersectsRect(en.pts, box));
+      const edgeKey = hitEdges.map((en) => en.fkKey).join(',');
+      if (edgeKey !== lastEdgeKey) {
+        lastEdgeKey = edgeKey;
+        const next = new Map(baseEdges);
+        for (const en of hitEdges) next.set(en.fkKey, en.label);
+        setSelectedEdges(next);
+      }
     };
     const onUp = () => {
       setMarquee(null);

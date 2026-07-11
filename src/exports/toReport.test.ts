@@ -98,6 +98,23 @@ describe('buildReviewReport', () => {
     expect(md).not.toContain('隐藏表上的批注');
   });
 
+  it('omits candidate sections per export options (manual logical always kept)', () => {
+    const md = buildReviewReport({
+      schema,
+      inferred: [fkCandidate, logicalCandidate],
+      decisions: {},
+      manualFks: [manualLogical],
+      deletedTableNames: [],
+      include: { inferredFkCandidates: false, logicalCandidates: false },
+      generatedAt: AT,
+    });
+    expect(md).not.toContain('## 推断外键候选');
+    expect(md).not.toContain('payments.order_id'); // fk candidate gone
+    expect(md).not.toContain('out_trade_no'); // logical candidate gone
+    expect(md).toContain('[手动添加] `orders.batch_no` ~ `payments.batch_no`'); // user's own assertion stays
+    expect(md).toContain('本报告按导出选项省略：推断外键候选、逻辑关联候选');
+  });
+
   it('marks rejected candidates and excludes edges touching recycle-binned tables', () => {
     const md = buildReviewReport({
       schema,
