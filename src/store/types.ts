@@ -1,4 +1,4 @@
-import type { Schema } from '../parser/types';
+import type { ForeignKey, Schema } from '../parser/types';
 import type { InferredFK } from '../infer/inferForeignKeys';
 import type { ModulesResult, PaletteName } from '../infer/inferModules';
 
@@ -13,6 +13,12 @@ export interface DisplayOptions {
   showComment: boolean;
   showIndex: boolean;
   showLowConfidence: boolean;
+  /** Draw the inferred logical (business-key) links on the canvas. The 逻辑
+   *  关联 section's 隐藏/显示连线 toggle — hide them all to compare the
+   *  physical-only picture, flip back to see the full one. */
+  showLogicalLinks: boolean;
+  /** Draw the hand-drawn manual relations (手动连线 section's toggle). */
+  showManualLinks: boolean;
 }
 
 export interface SchemaState {
@@ -21,18 +27,40 @@ export interface SchemaState {
   inferred: InferredFK[];
   modules: ModulesResult;
   palette: PaletteName;
+  /** Business-key column names (lowercased) the user picked in the 逻辑关联
+   *  scan — logical-link inference runs ONLY for these. Persisted (a refresh
+   *  re-derives the same candidates); cleared on a new import (`setSql`). */
+  logicalKeys: string[];
   setSql: (sql: string) => void;
   reparse: () => void;
   setPalette: (p: PaletteName) => void;
+  /** Replace the picked business keys and re-derive inferred + modules. */
+  setLogicalKeys: (keys: string[]) => void;
 }
 
 export interface DecisionsState {
   decisions: Record<string, 'accept' | 'reject'>;
+  /** User-added FKs (`source: 'manual'`) for relations the engine can't infer
+   *  (e.g. `check_task_detail.task_id → check_task`). Always drawn solid, not
+   *  gated by `decisions`. Persisted; cleared on a new import (`setSql`), kept
+   *  on refresh (`reparse`) — same lifecycle as `decisions`. */
+  manualFks: ForeignKey[];
   acceptFk: (key: string) => void;
   rejectFk: (key: string) => void;
   batchDecide: (keys: string[], decision: 'accept' | 'reject') => void;
   batchClear: (keys: string[]) => void;
   resetDecisions: () => void;
+  /** Add a manual FK. No-op if its `canonicalFkKey` collides with any explicit,
+   *  inferred, or existing manual FK — callers validate first for UX, this
+   *  guard keeps the buildGraph route-key invariant safe. */
+  addManualFk: (fk: ForeignKey) => void;
+  /** Remove a manual FK by its `canonicalFkKey`. */
+  removeManualFk: (key: string) => void;
+  /** Flip a manual relation between 物理外键 and 逻辑关联 (the 手动连线 panel's
+   *  batch type editing). Returns a user-facing error when the switch would
+   *  collide with another relation's key (logical re-normalizes direction, so
+   *  the key can change); null on success. */
+  setManualFkKind: (key: string, kind: 'fk' | 'logical') => string | null;
 }
 
 export interface DisplayState {
@@ -125,11 +153,32 @@ export interface CanvasState {
   restoreTable: (id: string) => void;
   restoreAllTables: () => void;
   flashModule: (moduleKey: string) => void;
+  /** Center + flash a single table (e.g. clicking a review note in the
+   *  recent-notes overlay). */
+  flashTable: (tableName: string) => void;
   clearFlash: () => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setCanvasMode: (m: CanvasMode) => void;
   toggleCanvasMode: () => void;
+}
+
+/** One field-level review annotation. */
+export interface FieldNote {
+  text: string;
+  /** ISO timestamp of the last edit — part of the review record (exported in
+   *  the 评审报告 and shown in the recent-notes overlay). Empty for legacy
+   *  notes persisted before timestamps existed. */
+  updatedAt: string;
+}
+
+export interface NotesState {
+  /** Field-level review annotations, keyed `table::column` (see
+   *  `fieldNoteKey`). Persisted; cleared on a new import (`setSql`); surfaced
+   *  in the 评审报告 export. */
+  fieldNotes: Record<string, FieldNote>;
+  /** Set (or clear, with empty text) the review note for one field. */
+  setFieldNote: (table: string, column: string, text: string) => void;
 }
 
 /**
@@ -147,4 +196,9 @@ export interface HistoryState {
   setHistoryFlags: (canUndo: boolean, canRedo: boolean) => void;
 }
 
-export type AppState = SchemaState & DecisionsState & DisplayState & CanvasState & HistoryState;
+export type AppState = SchemaState &
+  DecisionsState &
+  DisplayState &
+  CanvasState &
+  HistoryState &
+  NotesState;

@@ -10,6 +10,8 @@ export const createDisplaySlice: StateCreator<AppState, [], [], DisplayState> = 
     showComment: true,
     showIndex: true,
     showLowConfidence: false,
+    showLogicalLinks: true,
+    showManualLinks: true,
   },
   search: '',
   searchMatchIds: [],

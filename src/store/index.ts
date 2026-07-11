@@ -6,6 +6,7 @@ import { createDecisionsSlice } from './decisionsSlice';
 import { createDisplaySlice } from './displaySlice';
 import { createCanvasSlice } from './canvasSlice';
 import { createHistorySlice } from './historySlice';
+import { createNotesSlice } from './notesSlice';
 import { migratePersisted, sanitizePersisted } from './persistMigrate';
 
 export type { AppState, DisplayOptions } from './types';
@@ -71,6 +72,7 @@ export const useApp = create<AppState>()(
       ...createDisplaySlice(...a),
       ...createCanvasSlice(...a),
       ...createHistorySlice(...a),
+      ...createNotesSlice(...a),
     }),
     {
       name: PERSIST_KEY,

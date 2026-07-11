@@ -67,6 +67,23 @@ export function buildStylesheet(): StylesheetJson {
         width: 1.3,
       } as any,
     },
+    // Self-loops (same-table relations, e.g. parent_id → id): cytoscape's
+    // `segments` curve-style can't render loop edges (and its `bezier` loops
+    // dock at the node boundary, not at the FIELD ROWS, drifting the endpoints
+    // onto other fields). Loops are hidden here and drawn by the DOM overlay
+    // (`SelfLoopLayer` in DiagramCanvas) as the exact orthogonal U-bracket
+    // from `routePoints` — the same polyline the SVG export draws.
+    {
+      selector: 'edge:loop',
+      style: { display: 'none' } as any,
+    },
+    // The manual relation currently selected on the canvas (click an edge →
+    // Delete removes it). Strong width + full opacity so it pops over its
+    // neighbours.
+    {
+      selector: 'edge.manual-selected',
+      style: { width: 3.5, opacity: 1, 'z-index': 11 } as any,
+    },
     // Line style is decision-driven, not confidence-driven:
     //   explicit FK or user-accepted inferred FK → solid
     //   inferred FK still pending decision         → dashed (any confidence)
@@ -80,6 +97,25 @@ export function buildStylesheet(): StylesheetJson {
       // Low-confidence pending edges keep a slightly fainter look so users
       // can still tell them apart at a glance, without changing the dash style.
       style: { opacity: 0.55 },
+    },
+    // Logical (business-key) links: undirected — dotted line, small circle
+    // endpoints instead of the FK triangle. Placed AFTER the lineStyle rules
+    // so dotted wins over dashed; for logical edges `lineStyle` only carries
+    // the accepted/pending bit, expressed as opacity below (line-style can't
+    // be dotted and dashed at once).
+    {
+      selector: 'edge[kind = "logical"]',
+      style: {
+        'line-style': 'dotted',
+        'target-arrow-shape': 'circle',
+        'source-arrow-shape': 'circle',
+        'source-arrow-color': 'data(color)',
+        'arrow-scale': 0.55,
+      } as any,
+    },
+    {
+      selector: 'edge[kind = "logical"][lineStyle = "dashed"]',
+      style: { opacity: 0.45 },
     },
     {
       selector: 'edge.highlight',

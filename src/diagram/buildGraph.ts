@@ -256,6 +256,9 @@ export function columnRowOffsets(table: Table, display: BuildDisplayOpts): numbe
 export function buildFkSourceColumns(fks: ForeignKey[]): Map<string, Set<string>> {
   const map = new Map<string, Set<string>>();
   for (const fk of fks) {
+    // Logical (business-key) links are not foreign keys — their endpoint
+    // columns must not get the FK badge.
+    if (fk.kind === 'logical') continue;
     let set = map.get(fk.fromTable);
     if (!set) {
       set = new Set();
@@ -285,6 +288,7 @@ export function buildElements(
   const { modules, collapsed, tableWidths, display, decisions } = opts;
   const elements: ElementDefinition[] = [];
 
+  const widthByTable = new Map<string, number>();
   for (const table of schema.tables) {
     const isCollapsed = !!collapsed[table.name];
     const moduleKey = modules.byTable.get(table.name) ?? '';
@@ -295,6 +299,7 @@ export function buildElements(
       moduleKey,
       tableWidths[table.name],
     );
+    widthByTable.set(table.name, width);
     const color = colorForTableModule(table.name, modules.byTable, modules.modules);
     elements.push({
       group: 'nodes',
@@ -326,8 +331,11 @@ export function buildElements(
   // Invariant relied on here: a baseKey's collision COUNT is a function of
   // rawSql alone — visibility toggles never change it, and `setSql` (the only
   // mutation that can) clears manualRoutes. So a key never flips between bare
-  // and suffixed while a route is persisted. Preserve that if you add a new FK
-  // source, or routes keyed by the bare baseKey could be orphaned on rebuild.
+  // and suffixed while a route is persisted. Manual FKs preserve this:
+  // `addManualFk` refuses any key already taken by an explicit/inferred/manual
+  // FK (even a hidden one), so a manual add can never bump an existing key's
+  // count. Preserve that if you add a new FK source, or routes keyed by the
+  // bare baseKey could be orphaned on rebuild.
   const fkKeyCounts = new Map<string, number>();
   for (const fk of fks) {
     const k = fkKey(fk);
@@ -356,11 +364,11 @@ export function buildElements(
     const tgtTable = tableByName.get(fk.toTable);
     const srcRowIdx = srcTable?.columns.findIndex((c) => c.name === fk.fromColumns[0]) ?? -1;
     const tgtRowIdx = tgtTable?.columns.findIndex((c) => c.name === fk.toColumns[0]) ?? -1;
-    // Solid iff: explicitly declared in DDL, OR user accepted this inferred FK.
-    // Everything else (inferred + not yet decided, regardless of confidence) is
-    // rendered dashed. Once accepted via the InferencePanel it turns solid.
+    // Solid iff: explicitly declared in DDL, user-added (manual), OR user
+    // accepted this inferred FK. Everything else (inferred + not yet decided,
+    // regardless of confidence) is rendered dashed.
     const baseKey = fkKey(fk);
-    const accepted = fk.source === 'explicit' || decisions[baseKey] === 'accept';
+    const accepted = fk.source !== 'inferred' || decisions[baseKey] === 'accept';
     const lineStyle: 'solid' | 'dashed' = accepted ? 'solid' : 'dashed';
     const edgeFkKey =
       (fkKeyCounts.get(baseKey) ?? 0) > 1 ? `${baseKey}#${fkRouteDisambig(fk)}` : baseKey;
@@ -372,8 +380,18 @@ export function buildElements(
         fkKey: edgeFkKey,
         source: nodeId(fk.fromTable),
         target: nodeId(fk.toTable),
-        confidence: fk.source === 'explicit' ? 'high' : (fk.confidence ?? 'medium'),
+        confidence: fk.source === 'inferred' ? (fk.confidence ?? 'medium') : 'high',
         lineStyle,
+        // 'logical' switches the edge to the undirected business-key style
+        // (dotted, circle endpoints — see style.ts). For logical edges the
+        // `lineStyle` data field only carries the accepted/pending bit
+        // (opacity), since dotted already occupies cytoscape's line-style.
+        kind: fk.kind ?? 'fk',
+        // Self-loops are drawn by the DOM overlay (SelfLoopLayer), not by
+        // cytoscape (`segments` can't render loops; see style.ts). `loopSide`
+        // picks which side the U-bracket bulges out of — the side the user
+        // started the drag from, defaulting to the right.
+        loopSide: fk.fromTable === fk.toTable ? (fk.drawSide ?? 'right') : '',
         color,
         // Dark-canvas-safe variant of `color`: dark palette hues (mono, earth,
         // darker vibrant) are lifted to a visible lightness. The canvas swaps
@@ -394,6 +412,7 @@ export function buildElements(
         segDistances: '0 0',
         meta: {
           source: fk.source,
+          kind: fk.kind ?? 'fk',
           reason: fk.reason,
           fromColumns: fk.fromColumns,
           toColumns: fk.toColumns,

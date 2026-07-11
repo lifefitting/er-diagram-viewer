@@ -11,6 +11,16 @@ interface ColumnRowProps {
   showComment: boolean;
   isFk: boolean;
   query?: string;
+  /** Mousedown on the row's connect dot: start a drag-to-connect manual
+   *  relation from this column. `side` is which dot was grabbed — the rubber
+   *  curve leaves the card horizontally on that side. Absent (pan mode) hides
+   *  the dots. */
+  onConnectStart?: (side: 'left' | 'right', e: React.MouseEvent) => void;
+  /** This field has a review note (评审批注) — show the amber marker. */
+  hasNote?: boolean;
+  /** Click on the row: open the review-note bubble for this field. Also
+   *  enables the hover highlight that signals the row is clickable. */
+  onOpenNote?: (e: React.MouseEvent) => void;
 }
 
 /**
@@ -30,6 +40,9 @@ export function ColumnRow({
   showComment,
   isFk,
   query = '',
+  onConnectStart,
+  hasNote = false,
+  onOpenNote,
 }: ColumnRowProps) {
   const roleBadge = columnRoleBadge(col, table, showIndex);
   const isPk = roleBadge === 'PK';
@@ -45,13 +58,27 @@ export function ColumnRow({
   return (
     <div
       className={clsx(
-        'border-t border-ink-100 dark:border-inkd-300',
+        'group/row relative border-t border-ink-100 dark:border-inkd-300',
         // PK rows get a faint amber tint so the user can scan for the primary
         // key at a glance. The dark-mode variant is a translucent amber so it
         // sits on top of the card surface without overwhelming it.
         isPk && 'bg-amber-50/70 dark:bg-amber-900/20',
+        // Clickable-for-review affordance: rows light up on hover and open
+        // the note bubble on click.
+        onOpenNote && 'cursor-pointer hover:bg-sky-50/70 dark:hover:bg-sky-900/20',
       )}
-      title={tooltip}
+      title={hasNote ? `${tooltip}\n（有评审批注，点击查看）` : tooltip}
+      // Drop-target markers for the drag-to-connect gesture: the canvas finds
+      // the row under the cursor via elementFromPoint + closest('[data-fk-col]').
+      data-fk-table={table.name}
+      data-fk-col={col.name}
+      onClick={
+        onOpenNote &&
+        ((e) => {
+          e.stopPropagation();
+          onOpenNote(e);
+        })
+      }
     >
       <div
         className="flex items-center gap-2 px-2 leading-none"
@@ -70,6 +97,12 @@ export function ColumnRow({
           style={{ fontWeight: isPk ? 600 : 400 }}
         >
           {highlightMatch(col.name, query)}
+          {hasNote && (
+            <span
+              className="ml-1 inline-block h-[6px] w-[6px] rounded-full bg-amber-500 align-middle"
+              aria-label="有评审批注"
+            />
+          )}
         </span>
         {typeText && (
           <span
@@ -80,6 +113,35 @@ export function ColumnRow({
           </span>
         )}
       </div>
+      {/* Connect dots (触点): appear on row hover at BOTH edges of the name
+          row — the user drags from whichever side faces the target table, so
+          left→right and right→left connects both feel natural. Dragging one
+          onto another table's field row creates a manual FK. z-10 keeps them
+          above the card's resize strip; mousedown must not bubble (the
+          marquee/pan handlers live on the canvas underneath). */}
+      {onConnectStart &&
+        (['left', 'right'] as const).map((side) => (
+          <button
+            key={side}
+            type="button"
+            className={clsx(
+              'connect-dot absolute z-10 flex h-[14px] w-[14px] items-center justify-center rounded-full',
+              'border border-sky-500 bg-white dark:bg-inkd-100',
+              'opacity-0 transition-opacity group-hover/row:opacity-100',
+              'hover:bg-sky-100 dark:hover:bg-sky-900/40 cursor-crosshair',
+            )}
+            style={{ [side]: 3, top: FIELD_ROW_HEIGHT / 2 - 7 }}
+            title="拖到目标表的字段上，手动建立外键"
+            aria-label={`从 ${table.name}.${col.name} 拖线建立外键（${side === 'left' ? '左' : '右'}）`}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onConnectStart(side, e);
+            }}
+          >
+            <span className="h-[6px] w-[6px] rounded-full bg-sky-500" aria-hidden />
+          </button>
+        ))}
       {showComment && col.comment && (
         <div
           className={clsx(

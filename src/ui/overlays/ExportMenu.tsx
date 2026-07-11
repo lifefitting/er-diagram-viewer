@@ -3,6 +3,10 @@ import { useApp, effectiveForeignKeys, visibleSchema } from '../../store';
 import type { Core } from 'cytoscape';
 import { getCy } from '../../diagram/cyHandle';
 import { appendInferredToScript } from '../../exports/toDdl';
+import { buildReviewReport } from '../../exports/toReport';
+import { buildSpecDoc } from '../../exports/toSpecDoc';
+import { fkKey } from '../../infer/inferForeignKeys';
+import { nodeId } from '../../diagram/nodeId';
 import {
   buildDiagramSvg,
   exportBackgroundColor,
@@ -29,6 +33,8 @@ export function ExportMenu() {
   const modules = useApp((s) => s.modules);
   const inferred = useApp((s) => s.inferred);
   const decisions = useApp((s) => s.decisions);
+  const manualFks = useApp((s) => s.manualFks);
+  const fieldNotes = useApp((s) => s.fieldNotes);
   const deletedTables = useApp((s) => s.deletedTables);
   const rawSql = useApp((s) => s.rawSql);
   const display = useApp((s) => s.display);
@@ -41,9 +47,14 @@ export function ExportMenu() {
 
   // The same effective FK set the canvas draws, so the exported file matches
   // the on-screen state including pending/accepted/rejected decisions + hidden tables.
+  // Exports follow the on-canvas visibility, including the 逻辑关联/手动连线
+  // section toggles — what you see is what you export.
   const effectiveFks = useMemo(
-    () => (schema ? effectiveForeignKeys(schema, inferred, decisions, showLow, deletedTables) : []),
-    [schema, inferred, decisions, showLow, deletedTables],
+    () =>
+      schema
+        ? effectiveForeignKeys(schema, inferred, decisions, showLow, deletedTables, manualFks, display)
+        : [],
+    [schema, inferred, decisions, showLow, deletedTables, manualFks, display],
   );
 
   const fkSourceColumns = useMemo(() => buildFkSourceColumns(effectiveFks), [effectiveFks]);
@@ -118,12 +129,51 @@ export function ExportMenu() {
 
   const exportDdl = () => {
     if (!schema) return;
-    const fks = effectiveFks;
-    const onlyInferred = fks.filter((f) => f.source === 'inferred');
-    const ddl = appendInferredToScript(rawSql, onlyInferred);
+    // Everything not already in the script: inferred (visible/accepted) FKs
+    // plus user-added manual ones. Logical links come out as comment lines
+    // (toDdl splits by kind) — no physical constraint exists to declare.
+    const added = effectiveFks.filter((f) => f.source !== 'explicit');
+    const ddl = appendInferredToScript(rawSql, added);
     download(
       'data:text/plain;charset=utf-8,' + encodeURIComponent(ddl),
       `schema-with-fks-${ts()}.sql`,
+    );
+    setOpen(false);
+  };
+
+  const exportReport = () => {
+    if (!schema || !rawSchema) return;
+    // Recycle-bin'd tables by ORIGINAL name: deletedTables keys are node ids
+    // (`t:` + lowercased name), so reverse-map through the raw schema.
+    const deletedTableNames = rawSchema.tables
+      .map((t) => t.name)
+      .filter((name) => deletedTables[nodeId(name)]);
+    const md = buildReviewReport({
+      schema,
+      inferred,
+      decisions,
+      manualFks,
+      deletedTableNames,
+      fieldNotes,
+    });
+    download(
+      'data:text/markdown;charset=utf-8,' + encodeURIComponent(md),
+      `er-review-report-${ts()}.md`,
+    );
+    setOpen(false);
+  };
+
+  const exportSpecDoc = () => {
+    if (!schema) return;
+    // A spec document states FACTS: explicit FKs, user-accepted candidates and
+    // manual relations — never pending candidates (those live in the 评审报告).
+    const confirmed = effectiveFks.filter(
+      (f) => f.source !== 'inferred' || decisions[fkKey(f)] === 'accept',
+    );
+    const md = buildSpecDoc({ schema, relations: confirmed });
+    download(
+      'data:text/markdown;charset=utf-8,' + encodeURIComponent(md),
+      `db-spec-${ts()}.md`,
     );
     setOpen(false);
   };
@@ -173,6 +223,18 @@ export function ExportMenu() {
           />
           <div className="my-1 border-t border-ink-100 dark:border-inkd-300" />
           <MenuItem icon={<CodeIcon />} label="含 FK 的 DDL" hint=".sql" onClick={exportDdl} />
+          <MenuItem
+            icon={<ReportIcon />}
+            label="评审报告"
+            hint=".md"
+            onClick={exportReport}
+          />
+          <MenuItem
+            icon={<SpecIcon />}
+            label="数据库说明文档"
+            hint=".md"
+            onClick={exportSpecDoc}
+          />
         </div>
       )}
     </div>
@@ -276,6 +338,24 @@ function SvgIcon() {
       >
         SVG
       </text>
+    </svg>
+  );
+}
+
+function ReportIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="3" y="2" width="10" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SpecIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2.5" y="3" width="11" height="10" rx="1" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M2.5 6h11M6.5 6v7M2.5 9.5h11" stroke="currentColor" strokeWidth="1.2" />
     </svg>
   );
 }

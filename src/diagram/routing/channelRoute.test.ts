@@ -313,3 +313,66 @@ describe('sideBracketRoute (vertically-stacked cards)', () => {
     expect(sideBracketRoute(0, 200, srcSpan, tgtSpan, 30, [blockLeft, blockRight])).toBeNull();
   });
 });
+
+describe('detourRoute endpoint stubs (贴边修复)', () => {
+  // Left card → right card with a tall blocker between them: the detour must
+  // go around the blocker WITHOUT hugging either endpoint card's border, and
+  // must keep a horizontal stub at each field-row port so the docked field
+  // stays readable.
+  const left: Rect = { x1: 0, y1: 0, x2: 100, y2: 200 };
+  const right: Rect = { x1: 400, y1: 0, x2: 500, y2: 200 };
+  const blocker: Rect = { x1: 200, y1: -40, x2: 300, y2: 260 };
+  const src: Pt = { x: 100, y: 60 }; // port on left card's right edge
+  const tgt: Pt = { x: 400, y: 80 }; // port on right card's left edge
+
+  it('keeps a ≥18px horizontal stub at both ports', () => {
+    const pts = detourRoute(src, tgt, [blocker], {
+      srcRect: left,
+      tgtRect: right,
+      srcDir: 1,
+      tgtDir: -1,
+    });
+    expect(pts).not.toBeNull();
+    const p = pts!;
+    // First leg: horizontal, leaving the card by at least the stub length.
+    expect(Math.abs(p[1].y - src.y)).toBeLessThan(0.6);
+    expect(p[1].x - src.x).toBeGreaterThanOrEqual(17.9);
+    // Last leg: horizontal into the target port.
+    expect(Math.abs(p[p.length - 2].y - tgt.y)).toBeLessThan(0.6);
+    expect(tgt.x - p[p.length - 2].x).toBeGreaterThanOrEqual(17.9);
+    // Route clears the blocker.
+    expect(routeIsClear(p, blocker)).toBe(true);
+  });
+
+  it('no leg runs flush along an endpoint card border', () => {
+    const pts = detourRoute(src, tgt, [blocker], {
+      srcRect: left,
+      tgtRect: right,
+      srcDir: 1,
+      tgtDir: -1,
+    })!;
+    // Interior vertices must keep clear of the endpoint cards' vertical
+    // borders while alongside them (the pre-fix failure mode: a vertical drop
+    // at exactly x = card edge).
+    for (const p of pts.slice(1, -1)) {
+      const besideLeft = p.y >= left.y1 - 10 && p.y <= left.y2 + 10;
+      const besideRight = p.y >= right.y1 - 10 && p.y <= right.y2 + 10;
+      if (besideLeft) expect(Math.abs(p.x - left.x2)).toBeGreaterThanOrEqual(9.9);
+      if (besideRight) expect(Math.abs(p.x - right.x1)).toBeGreaterThanOrEqual(9.9);
+    }
+  });
+
+  it('falls back to the plain search when a stub tip is blocked', () => {
+    // A card jammed right against the source port's stub zone.
+    const jam: Rect = { x1: 120, y1: 40, x2: 160, y2: 90 };
+    const pts = detourRoute(src, tgt, [blocker, jam], {
+      srcRect: left,
+      tgtRect: right,
+      srcDir: 1,
+      tgtDir: -1,
+    });
+    // Still routes (plain mode) rather than returning null outright.
+    expect(pts).not.toBeNull();
+    expect(routeIsClear(pts!, blocker)).toBe(true);
+  });
+});

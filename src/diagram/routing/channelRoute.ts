@@ -116,6 +116,15 @@ export function directOrthogonalRoute(src: Pt, tgt: Pt, obstacles: Rect[]): Pt[]
 const DETOUR_MARGIN = 18;
 /** Cost (px) added per right-angle turn so the search prefers straighter paths. */
 const BEND_PENALTY = 30;
+/** Keep-out margin around the edge's OWN endpoint cards (when provided): a
+ *  detour leg must never run flush along an endpoint card's border, or the
+ *  connector becomes indistinguishable from the card outline and the field it
+ *  docks to is unreadable. Smaller than PORT_STUB so the stub tip stays
+ *  outside its own card's keep-out. */
+const ENDPOINT_MARGIN = 10;
+/** Length of the horizontal stub the route must keep at each port before it
+ *  may turn — the visual anchor tying the connector to its field row. */
+const PORT_STUB = 18;
 
 function inflateRect(r: Rect, m: number): Rect {
   return { x1: r.x1 - m, y1: r.y1 - m, x2: r.x2 + m, y2: r.y2 + m };
@@ -123,6 +132,17 @@ function inflateRect(r: Rect, m: number): Rect {
 
 function pointInsideRect(p: Pt, r: Rect): boolean {
   return p.x > r.x1 + EPS && p.x < r.x2 - EPS && p.y > r.y1 + EPS && p.y < r.y2 - EPS;
+}
+
+/** Optional endpoint-card context for {@link detourRoute}: with it, the route
+ *  keeps a horizontal PORT_STUB at each port and treats the endpoint cards
+ *  themselves as keep-outs (minus the stub), so no leg can hug a card border. */
+export interface DetourEndpoints {
+  srcRect?: Rect;
+  tgtRect?: Rect;
+  /** Horizontal exit direction at each port: +1 = leaves to the right. */
+  srcDir?: 1 | -1;
+  tgtDir?: 1 | -1;
 }
 
 /**
@@ -140,11 +160,48 @@ function pointInsideRect(p: Pt, r: Rect): boolean {
  * rect. Dijkstra (tiny graph) with a stable tie-break finds the lowest-cost
  * path; cost = Manhattan length + a per-bend penalty so it prefers fewer turns.
  *
+ * When `endpoints` provides the edge's own card rects + exit directions, the
+ * search runs between STUB TIPS (port ± PORT_STUB) with the endpoint cards
+ * added as keep-outs (inflated by ENDPOINT_MARGIN < PORT_STUB, so each tip
+ * stays reachable). Without it, a detour's first move may legally be a
+ * vertical drop AT the port — i.e. flush along the card's own border (the
+ * endpoint cards are excluded from `obstacles`), which reads as part of the
+ * card outline and hides which field the edge leaves from.
+ *
  * Returns `[src, ...bends, tgt]` (src/tgt kept as first/last so the
  * routePoints/SVG port-docking contract holds) or null when fully boxed in.
  * `obstacles` must EXCLUDE the two endpoint cards (use `buildObstacles`).
  */
-export function detourRoute(src: Pt, tgt: Pt, obstacles: Rect[]): Pt[] | null {
+export function detourRoute(
+  src: Pt,
+  tgt: Pt,
+  obstacles: Rect[],
+  endpoints?: DetourEndpoints,
+): Pt[] | null {
+  // Endpoint-aware mode: route between the stub tips with the endpoint cards
+  // as keep-outs. If a tip lands inside some keep-out (cards overlapping the
+  // stub zone), fall back to the plain port-to-port search — a slightly uglier
+  // route beats no route.
+  if (endpoints && (endpoints.srcRect || endpoints.tgtRect)) {
+    const { srcRect, tgtRect, srcDir = 1, tgtDir = -1 } = endpoints;
+    const s0 = srcRect ? { x: src.x + srcDir * PORT_STUB, y: src.y } : src;
+    const t0 = tgtRect ? { x: tgt.x + tgtDir * PORT_STUB, y: tgt.y } : tgt;
+    const extra: Rect[] = [];
+    if (srcRect) extra.push(inflateRect(srcRect, ENDPOINT_MARGIN));
+    if (tgtRect) extra.push(inflateRect(tgtRect, ENDPOINT_MARGIN));
+    const blockedTip = [...obstacles.map((r) => inflateRect(r, DETOUR_MARGIN)), ...extra].some(
+      (r) => pointInsideRect(s0, r) || pointInsideRect(t0, r),
+    );
+    if (!blockedTip) {
+      const inner = detourCore(s0, t0, obstacles, extra);
+      if (inner) return mergeCollinear([src, ...inner, tgt]);
+    }
+    // fall through to the plain search
+  }
+  return detourCore(src, tgt, obstacles, []);
+}
+
+function detourCore(src: Pt, tgt: Pt, obstacles: Rect[], extraKeepOut: Rect[]): Pt[] | null {
   // Only obstacles near the src→tgt box can shape a sensible detour; pruning to
   // them keeps the vertex set (and the work) small regardless of schema size.
   const pad = DETOUR_MARGIN * 2;
@@ -152,9 +209,14 @@ export function detourRoute(src: Pt, tgt: Pt, obstacles: Rect[]): Pt[] | null {
   const bx2 = Math.max(src.x, tgt.x) + pad;
   const by1 = Math.min(src.y, tgt.y) - pad;
   const by2 = Math.max(src.y, tgt.y) + pad;
-  const keepOut = obstacles
-    .map((r) => inflateRect(r, DETOUR_MARGIN))
-    .filter((r) => r.x2 >= bx1 && r.x1 <= bx2 && r.y2 >= by1 && r.y1 <= by2);
+  const keepOut = [
+    ...obstacles
+      .map((r) => inflateRect(r, DETOUR_MARGIN))
+      .filter((r) => r.x2 >= bx1 && r.x1 <= bx2 && r.y2 >= by1 && r.y1 <= by2),
+    // Endpoint-card keep-outs are pre-inflated (ENDPOINT_MARGIN) and always
+    // relevant — never distance-pruned.
+    ...extraKeepOut,
+  ];
 
   // Routing vertices: ports + obstacle corners, dropping any corner buried
   // inside another keep-out rect (it can never be a usable waypoint).

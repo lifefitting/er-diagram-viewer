@@ -45,6 +45,23 @@ describe('layoutEdgeWeight', () => {
     });
     expect(same).toBeGreaterThan(cross);
   });
+
+  it('keeps logical (business-key) links light regardless of source', () => {
+    const w = (m: Partial<Parameters<typeof layoutEdgeWeight>[0]>) =>
+      layoutEdgeWeight({
+        source: 'inferred',
+        kind: 'logical',
+        confidence: 'medium',
+        accepted: false,
+        sameModule: false,
+        ...m,
+      });
+    expect(w({ accepted: true })).toBe(2);
+    expect(w({ accepted: false })).toBe(0.5);
+    expect(w({ accepted: true, sameModule: true })).toBeCloseTo(3.6);
+    // A MANUAL logical link must not weigh like a manual FK (16).
+    expect(w({ source: 'manual', accepted: true })).toBe(2);
+  });
 });
 
 describe('collapseLayoutPairs', () => {

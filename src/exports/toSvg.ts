@@ -132,6 +132,9 @@ interface EdgeEntry {
   dashed: boolean;
   /** Faded line for low-confidence pending FKs. */
   faint: boolean;
+  /** 'logical' = undirected business-key link: dot pattern + circle markers
+   *  at BOTH ends instead of the FK triangle. Mirrors style.ts. */
+  kind: 'fk' | 'logical';
   /** Absolute orthogonal polyline — the same path the canvas draws. */
   routePoints: string;
 }
@@ -191,6 +194,7 @@ export function buildDiagramSvg(cy: Core, opts: SvgRenderOpts): string {
         palette.textMuted,
       dashed: e.data('lineStyle') === 'dashed',
       faint: e.data('confidence') === 'low' && e.data('lineStyle') === 'dashed',
+      kind: (e.data('kind') as 'fk' | 'logical' | undefined) ?? 'fk',
       routePoints: (e.data('routePoints') as string | undefined) ?? '',
     });
   });
@@ -246,8 +250,10 @@ export function buildDiagramSvg(cy: Core, opts: SvgRenderOpts): string {
     `<rect x="${vbX}" y="${vbY}" width="${vbW}" height="${vbH}" fill="${palette.background}"/>`,
   );
 
-  // Arrow marker definitions, one per unique edge color (cheap dedup via a set).
-  const arrowColors = new Set(edges.map((e) => e.color));
+  // Marker definitions, deduped per (shape, color): FK edges use a triangle
+  // arrowhead, logical (business-key) edges an undirected circle at both ends.
+  const arrowColors = new Set(edges.filter((e) => e.kind !== 'logical').map((e) => e.color));
+  const dotColors = new Set(edges.filter((e) => e.kind === 'logical').map((e) => e.color));
   parts.push('<defs>');
   for (const color of arrowColors) {
     const id = arrowId(color);
@@ -256,6 +262,14 @@ export function buildDiagramSvg(cy: Core, opts: SvgRenderOpts): string {
       `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" ` +
         `markerWidth="8" markerHeight="8" orient="auto-start-reverse" markerUnits="userSpaceOnUse">` +
         `<polygon points="0,0 10,5 0,10" fill="${color}"/>` +
+        `</marker>`,
+    );
+  }
+  for (const color of dotColors) {
+    parts.push(
+      `<marker id="${dotId(color)}" viewBox="0 0 10 10" refX="5" refY="5" ` +
+        `markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse">` +
+        `<circle cx="5" cy="5" r="3.2" fill="${color}"/>` +
         `</marker>`,
     );
   }
@@ -295,9 +309,20 @@ function renderEdge(e: EdgeEntry): string {
   // missing (edge added before the canvas ran its first endpoint pass) fall
   // back to a straight line between the recorded endpoints.
   const points = e.routePoints || `${fmt(e.sx)},${fmt(e.sy)} ${fmt(e.tx)},${fmt(e.ty)}`;
+  const stroke = e.color;
+  if (e.kind === 'logical') {
+    // Undirected business-key link — dot pattern, circle marker at BOTH ends,
+    // pending links faded (mirrors the canvas: dotted + opacity for the
+    // accepted/pending bit).
+    const opacity = e.dashed ? ' opacity="0.45"' : ' opacity="0.85"';
+    return (
+      `<polyline points="${points}" fill="none" stroke="${stroke}" stroke-width="1.6" ` +
+      `stroke-dasharray="2 4" marker-start="url(#${dotId(stroke)})" ` +
+      `marker-end="url(#${dotId(stroke)})"${opacity}/>`
+    );
+  }
   const dash = e.dashed ? ' stroke-dasharray="6 4"' : '';
   const opacity = e.faint ? ' opacity="0.55"' : ' opacity="0.85"';
-  const stroke = e.color;
   return (
     `<polyline points="${points}" fill="none" stroke="${stroke}" stroke-width="1.6" ` +
     `marker-end="url(#${arrowId(stroke)})"${dash}${opacity}/>`
@@ -510,6 +535,11 @@ function fmt(n: number): string {
 
 function arrowId(color: string): string {
   return 'arrow-' + color.replace(/[^a-zA-Z0-9]/g, '');
+}
+
+/** Circle endpoint marker for undirected logical (business-key) links. */
+function dotId(color: string): string {
+  return 'dot-' + color.replace(/[^a-zA-Z0-9]/g, '');
 }
 
 /**

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { Column, ForeignKey, Schema, Table } from '../parser/types';
 import {
   buildElements,
+  buildFkSourceColumns,
   columnRowOffsets,
   tableBoxSize,
   HEADER_HEIGHT,
@@ -95,6 +96,40 @@ describe('buildElements fkKey stability (finding 1)', () => {
   it('keeps the bare canonical key for a unique (non-colliding) FK', () => {
     const keys = edgeFkKeysBySource(schema, [fkExplicit]);
     expect(keys.explicit).toBe('orders.user_id->users.id');
+  });
+});
+
+describe('logical (business-key) edges', () => {
+  const schema = schemaOf([
+    table('orders', [col('id', { isPrimaryKey: true }), col('out_no')], ['id']),
+    table('payments', [col('id', { isPrimaryKey: true }), col('out_no')], ['id']),
+  ]);
+  const logical: ForeignKey = {
+    fromTable: 'orders',
+    fromColumns: ['out_no'],
+    toTable: 'payments',
+    toColumns: ['out_no'],
+    source: 'inferred',
+    kind: 'logical',
+    confidence: 'medium',
+  };
+
+  it('propagates kind onto edge data and meta', () => {
+    const { elements } = buildElements(schema, [logical], {
+      modules: inferModules(schema, [logical]),
+      collapsed: {},
+      tableWidths: {},
+      display: DISPLAY,
+      decisions: {},
+    });
+    const edge = elements.find((el) => el.group === 'edges')!;
+    expect(edge.data.kind).toBe('logical');
+    expect((edge.data.meta as { kind: string }).kind).toBe('logical');
+  });
+
+  it('excludes logical endpoints from the FK badge columns', () => {
+    const map = buildFkSourceColumns([logical]);
+    expect(map.size).toBe(0);
   });
 });
 

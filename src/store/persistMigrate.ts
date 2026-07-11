@@ -45,6 +45,20 @@ function isManualRoutes(o: unknown): boolean {
   return isRecord(o) && Object.values(o).every((v) => Array.isArray(v) && v.every(isPt));
 }
 
+/** A persisted manual FK: `source: 'manual'` plus non-empty table/column
+ *  names. `kind` is optional (absent = physical fk) but must be a known value
+ *  when present. */
+function isManualFk(v: unknown): boolean {
+  if (!isRecord(v) || v.source !== 'manual') return false;
+  if (typeof v.fromTable !== 'string' || v.fromTable.length === 0) return false;
+  if (typeof v.toTable !== 'string' || v.toTable.length === 0) return false;
+  if (v.kind !== undefined && v.kind !== 'fk' && v.kind !== 'logical') return false;
+  if (v.drawSide !== undefined && v.drawSide !== 'left' && v.drawSide !== 'right') return false;
+  const cols = (c: unknown) =>
+    Array.isArray(c) && c.length > 0 && c.every((n) => typeof n === 'string' && n.length > 0);
+  return cols(v.fromColumns) && cols(v.toColumns);
+}
+
 /** {x,y,zoom} with finite numbers. */
 function isViewport(o: unknown): boolean {
   return (
@@ -68,6 +82,35 @@ export function sanitizePersisted(raw: unknown): Persisted {
 
   if (isRecord(raw.decisions) && Object.values(raw.decisions).every((v) => v === 'accept' || v === 'reject'))
     out.decisions = raw.decisions;
+  if (Array.isArray(raw.manualFks) && raw.manualFks.every(isManualFk))
+    out.manualFks = raw.manualFks;
+  if (
+    Array.isArray(raw.logicalKeys) &&
+    raw.logicalKeys.every((k) => typeof k === 'string' && k.length > 0)
+  )
+    out.logicalKeys = raw.logicalKeys;
+  if (isRecord(raw.fieldNotes)) {
+    // Notes carry a timestamp since they gained one; legacy plain-string
+    // values (pre-timestamp snapshots) are upgraded with an empty updatedAt.
+    const notes: Record<string, { text: string; updatedAt: string }> = {};
+    let valid = true;
+    for (const [k, v] of Object.entries(raw.fieldNotes)) {
+      if (typeof v === 'string' && v.length > 0) {
+        notes[k] = { text: v, updatedAt: '' };
+      } else if (
+        isRecord(v) &&
+        typeof v.text === 'string' &&
+        v.text.length > 0 &&
+        (v.updatedAt === undefined || typeof v.updatedAt === 'string')
+      ) {
+        notes[k] = { text: v.text, updatedAt: (v.updatedAt as string) ?? '' };
+      } else {
+        valid = false;
+        break;
+      }
+    }
+    if (valid) out.fieldNotes = notes;
+  }
 
   if (
     isRecord(raw.display) &&
@@ -75,7 +118,9 @@ export function sanitizePersisted(raw: unknown): Persisted {
       (k) => typeof (raw.display as Record<string, unknown>)[k] === 'boolean',
     )
   )
-    out.display = raw.display;
+    // Later-added visibility toggles default ON for snapshots predating them
+    // (the shallow store merge would otherwise leave them undefined = hidden).
+    out.display = { showLogicalLinks: true, showManualLinks: true, ...raw.display };
 
   if (isRecord(raw.collapsed) && Object.values(raw.collapsed).every((v) => typeof v === 'boolean'))
     out.collapsed = raw.collapsed;

@@ -26,13 +26,18 @@ export function visibleSchema(
 }
 
 /**
- * Merge explicit + inferred FKs into the set of edges the UI actually draws.
+ * Merge explicit + inferred + manual FKs into the set of edges the UI actually
+ * draws.
  *
  *   - explicit FKs are always included.
  *   - inferred FKs respect the user's `decisions[fkKey]`:
  *       * 'reject'  → never drawn.
  *       * 'accept'  → always drawn (even low-confidence ones).
  *       * undefined → drawn unless `confidence === 'low'` AND `showLow=false`.
+ *   - manual FKs (user-added) are always included, like explicit ones. They
+ *     are validated against the live schema's table set: a stale entry (e.g.
+ *     from a hand-edited sessionStorage snapshot) is skipped rather than fed
+ *     to the canvas/DDL export.
  *
  * Pure function; called from the canvas, the export-to-DDL menu, and
  * anywhere else that needs the "what FKs are currently visible" answer.
@@ -43,15 +48,31 @@ export function effectiveForeignKeys(
   decisions: Record<string, 'accept' | 'reject'>,
   showLow: boolean,
   deletedTables: Record<string, true> = {},
+  manualFks: ForeignKey[] = [],
+  visibility: { showLogicalLinks?: boolean; showManualLinks?: boolean } = {},
 ): ForeignKey[] {
   if (!schema) return [];
+  // Whole-category visibility toggles (the 隐藏连线/显示连线 buttons on the
+  // 逻辑关联 / 手动连线 sections): compare the physical-only picture against
+  // the full one without touching any decision.
+  const showLogical = visibility.showLogicalLinks ?? true;
+  const showManual = visibility.showManualLinks ?? true;
   const out: ForeignKey[] = [...schema.explicitForeignKeys];
   for (const fk of inferred) {
+    if (fk.kind === 'logical' && !showLogical) continue;
     const key = fkKey(fk);
     const decision = decisions[key];
     if (decision === 'reject') continue;
     if (fk.confidence === 'low' && !showLow && decision !== 'accept') continue;
     out.push(fk);
+  }
+  if (manualFks.length > 0 && showManual) {
+    const liveTables = new Set(schema.tables.map((t) => t.name.toLowerCase()));
+    for (const fk of manualFks) {
+      if (!liveTables.has(fk.fromTable.toLowerCase())) continue;
+      if (!liveTables.has(fk.toTable.toLowerCase())) continue;
+      out.push(fk);
+    }
   }
   // Drop any edge touching a recycle-bin'd table (covers inferred edges, which
   // `visibleSchema` can't filter since they aren't on the schema).
