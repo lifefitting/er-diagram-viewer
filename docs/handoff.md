@@ -28,7 +28,7 @@ overlay）+ dagre（分层布局）+ Tailwind 3 + Vite/Vitest，Bun 作包管理
 ```bash
 bun install          # 依赖（bun.lock）
 bun run dev          # 开发（HMR 对 cytoscape 不可靠，见下文"验证方式"）
-bun run test         # vitest（270 用例 / 31 文件，全绿）；勿用裸 `bun test`
+bun run test         # vitest（276 用例 / 32 文件，全绿）；勿用裸 `bun test`
 bun run typecheck    # tsc -b --noEmit（strict，0 error）
 bun run lint         # eslint（当前 7 条 warning，均为既有 as any / exhaustive-deps）
 bun run build && bun run preview   # 端到端验证用这个，不要信 HMR
@@ -137,6 +137,10 @@ SQL 文本 ──parseSql──▶ Schema ──mergeShardedTables──▶ 合�
   的按钮（导出报告、解析并绘制、错误页刷新等）改为暗色文字；`applyEdgeTheme`
   补上 `source-arrow-color`——逻辑关联（无向边）两端圆点此前在暗色下仍用亮色
   画布的颜色。
+- **roadmap 1.1 工作区存档 ✅**（feat/workspace-archive 分支）：`.erreview` 导出/导入，
+  导入 = 校验（复用 sanitizePersisted）→ `importWorkspace` → `workspaceEpoch` 重挂载
+  画布重放刷新恢复路径（布局+相机逐像素还原，Playwright 实测 round-trip）。
+  详见 CLAUDE.md「Workspace archive」段与 roadmap 1.1。测试 276 用例 / 32 文件。
 
 ## 6. 开发约定
 

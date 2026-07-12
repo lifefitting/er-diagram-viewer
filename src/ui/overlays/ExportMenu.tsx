@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useApp, effectiveForeignKeys, visibleSchema } from '../../store';
+import { useApp, effectiveForeignKeys, visibleSchema, getPersistedSnapshot } from '../../store';
+import { buildWorkspaceArchive, ARCHIVE_EXTENSION } from '../../exports/archive';
+import { version as appVersion } from '../../../package.json';
 import type { Core } from 'cytoscape';
 import { getCy } from '../../diagram/cyHandle';
 import { appendInferredToScript } from '../../exports/toDdl';
@@ -57,7 +59,15 @@ export function ExportMenu() {
   const effectiveFks = useMemo(
     () =>
       schema
-        ? effectiveForeignKeys(schema, inferred, decisions, showLow, deletedTables, manualFks, display)
+        ? effectiveForeignKeys(
+            schema,
+            inferred,
+            decisions,
+            showLow,
+            deletedTables,
+            manualFks,
+            display,
+          )
         : [],
     [schema, inferred, decisions, showLow, deletedTables, manualFks, display],
   );
@@ -181,9 +191,26 @@ export function ExportMenu() {
       (f) => f.source !== 'inferred' || decisions[fkKey(f)] === 'accept',
     );
     const md = buildSpecDoc({ schema, relations: confirmed });
+    download('data:text/markdown;charset=utf-8,' + encodeURIComponent(md), `db-spec-${ts()}.md`);
+    setOpen(false);
+  };
+
+  const exportArchive = () => {
+    if (!rawSchema) return;
+    // The archive is a WORKSPACE snapshot, not a view export: it includes the
+    // full persisted state (recycle-binned tables, rejected candidates, layout,
+    // camera), so opening it elsewhere reproduces this session exactly.
+    const json = buildWorkspaceArchive(
+      getPersistedSnapshot() as unknown as Record<string, unknown>,
+      {
+        appVersion,
+        exportedAt: new Date().toISOString(),
+        tableCount: rawSchema.tables.length,
+      },
+    );
     download(
-      'data:text/markdown;charset=utf-8,' + encodeURIComponent(md),
-      `db-spec-${ts()}.md`,
+      'data:application/json;charset=utf-8,' + encodeURIComponent(json),
+      `er-workspace-${ts()}${ARCHIVE_EXTENSION}`,
     );
     setOpen(false);
   };
@@ -272,11 +299,13 @@ export function ExportMenu() {
               </div>
             </div>
           )}
+          <MenuItem icon={<SpecIcon />} label="数据库说明文档" hint=".md" onClick={exportSpecDoc} />
+          <div className="my-1 border-t border-ink-100 dark:border-inkd-300" />
           <MenuItem
-            icon={<SpecIcon />}
-            label="数据库说明文档"
-            hint=".md"
-            onClick={exportSpecDoc}
+            icon={<ArchiveIcon />}
+            label="工作区存档"
+            hint=".erreview"
+            onClick={exportArchive}
           />
         </div>
       )}
@@ -389,7 +418,12 @@ function ReportIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <rect x="3" y="2" width="10" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path
+        d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -399,6 +433,20 @@ function SpecIcon() {
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <rect x="2.5" y="3" width="11" height="10" rx="1" stroke="currentColor" strokeWidth="1.4" />
       <path d="M2.5 6h11M6.5 6v7M2.5 9.5h11" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+function ArchiveIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2" y="3" width="12" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M3.2 6.5v5A1.5 1.5 0 0 0 4.7 13h6.6a1.5 1.5 0 0 0 1.5-1.5v-5M6.5 9h3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

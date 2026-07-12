@@ -3,6 +3,12 @@ import clsx from 'clsx';
 import { useApp } from '../../store';
 import { parseSql } from '../../parser';
 import { SAMPLE_ECOMMERCE, SAMPLE_BLOG } from '../../samples';
+import {
+  looksLikeArchive,
+  parseWorkspaceArchive,
+  ARCHIVE_EXTENSION,
+  type ParseArchiveResult,
+} from '../../exports/archive';
 
 interface Props {
   open: boolean;
@@ -13,6 +19,9 @@ interface LoadedFile {
   name: string;
   size: number;
 }
+
+/** A successfully parsed `.erreview` file staged for import. */
+type LoadedArchive = Extract<ParseArchiveResult, { ok: true }>;
 
 const SAMPLES: Array<{ id: string; label: string; description: string; sql: string }> = [
   {
@@ -41,9 +50,14 @@ const PLACEHOLDER =
 
 export function SqlInputDialog({ open, onClose }: Props) {
   const setSql = useApp((s) => s.setSql);
+  const importWorkspace = useApp((s) => s.importWorkspace);
   const currentSql = useApp((s) => s.rawSql);
   const [text, setText] = useState(currentSql);
   const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null);
+  // Non-null = the loaded file was a workspace archive: the textarea shows its
+  // SQL (read-only preview) and the primary button switches to 导入存档. Any
+  // manual edit drops back to plain-SQL import.
+  const [loadedArchive, setLoadedArchive] = useState<LoadedArchive | null>(null);
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +73,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
     if (open) {
       setText(currentSql);
       setLoadedFile(null);
+      setLoadedArchive(null);
       setSamplesOpen(false);
       setError(null);
     }
@@ -75,23 +90,28 @@ export function SqlInputDialog({ open, onClose }: Props) {
 
   const submit = useCallback(() => {
     if (!text.trim()) return;
-    // Pre-flight parse before committing: `setSql` unconditionally clears
-    // decisions, layout and the recycle bin, so garbage input (or a parser
-    // throw) must not be allowed to wipe the current workspace.
+    // Pre-flight parse before committing: `setSql` / `importWorkspace`
+    // unconditionally replace decisions, layout and the recycle bin, so
+    // garbage input (or a parser throw) must not be allowed to wipe the
+    // current workspace.
     try {
-      const parsed = parseSql(text);
+      const sql = loadedArchive ? loadedArchive.state.rawSql : text;
+      const parsed = parseSql(sql);
       if (parsed.tables.length === 0) {
-        setError('未解析出任何表：请确认粘贴的是 CREATE TABLE / ALTER TABLE 脚本。当前图保持不变。');
+        setError(
+          '未解析出任何表：请确认粘贴的是 CREATE TABLE / ALTER TABLE 脚本。当前图保持不变。',
+        );
         return;
       }
-      setSql(text);
+      if (loadedArchive) importWorkspace(loadedArchive.state);
+      else setSql(text);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(`解析失败：${msg} —— 当前图保持不变。`);
       return;
     }
     onClose();
-  }, [setSql, text, onClose]);
+  }, [setSql, importWorkspace, loadedArchive, text, onClose]);
 
   // Keyboard shortcuts: Esc closes (or first closes the samples dropdown if
   // open), ⌘/Ctrl+Enter submits. Bound at window level so the textarea,
@@ -126,6 +146,31 @@ export function SqlInputDialog({ open, onClose }: Props) {
 
   const handleFile = useCallback(async (file: File) => {
     const content = await file.text();
+    // Workspace archives route to the import-archive flow. Sniff by content
+    // (SQL never starts with `{`), not extension — a re-saved or mailed
+    // archive may arrive as .json/.txt.
+    if (looksLikeArchive(content)) {
+      const parsed = parseWorkspaceArchive(content);
+      if (parsed.ok) {
+        setLoadedArchive(parsed);
+        setText(parsed.state.rawSql);
+        setLoadedFile({ name: file.name, size: file.size });
+        setError(null);
+        return;
+      }
+      setLoadedArchive(null);
+      if (file.name.endsWith(ARCHIVE_EXTENSION)) {
+        // Definitely meant as an archive — surface why it can't load instead
+        // of dumping JSON into the SQL editor.
+        setText('');
+        setLoadedFile(null);
+        setError(`无法导入存档：${parsed.error}`);
+        return;
+      }
+      // JSON-ish but not ours: fall through and let the SQL parser complain.
+    } else {
+      setLoadedArchive(null);
+    }
     setText(content);
     setLoadedFile({ name: file.name, size: file.size });
     requestAnimationFrame(() => textareaRef.current?.focus());
@@ -198,7 +243,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
                 导入 SQL 脚本
               </h2>
               <div className="text-[11px] text-ink-400 dark:text-inkd-500 leading-tight mt-0.5">
-                粘贴 DDL · 上传 .sql 文件 · 或将文件拖拽到任意位置
+                粘贴 DDL · 上传 .sql / .erreview 存档 · 或将文件拖拽到任意位置
               </div>
             </div>
           </div>
@@ -238,6 +283,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
                     onClick={() => {
                       setText(sample.sql);
                       setLoadedFile(null);
+                      setLoadedArchive(null);
                       setSamplesOpen(false);
                       requestAnimationFrame(() => textareaRef.current?.focus());
                     }}
@@ -259,6 +305,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
               onClick={() => {
                 setText('');
                 setLoadedFile(null);
+                setLoadedArchive(null);
                 textareaRef.current?.focus();
               }}
               icon={<TrashIcon />}
@@ -280,7 +327,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
 
           <input
             type="file"
-            accept=".sql,.ddl,.txt,text/plain"
+            accept=".sql,.ddl,.txt,.erreview,.json,text/plain,application/json"
             hidden
             ref={fileInputRef}
             onChange={async (e) => {
@@ -305,9 +352,11 @@ export function SqlInputDialog({ open, onClose }: Props) {
             value={text}
             onChange={(e) => {
               setText(e.target.value);
-              // Manual edits invalidate the "loaded from file" badge and any
-              // stale parse-failure message.
+              // Manual edits invalidate the "loaded from file" badge, the
+              // staged archive (edited SQL ≠ the archive's workspace anymore),
+              // and any stale parse-failure message.
               if (loadedFile) setLoadedFile(null);
+              if (loadedArchive) setLoadedArchive(null);
               if (error) setError(null);
             }}
             placeholder={PLACEHOLDER}
@@ -323,10 +372,36 @@ export function SqlInputDialog({ open, onClose }: Props) {
               <div className="text-sm font-medium text-ink-800 dark:text-inkd-800">
                 释放以加载文件
               </div>
-              <div className="text-[11px] text-ink-400 dark:text-inkd-500">.sql / .ddl / .txt</div>
+              <div className="text-[11px] text-ink-400 dark:text-inkd-500">
+                .sql / .ddl / .txt / .erreview 存档
+              </div>
             </div>
           )}
         </div>
+
+        {/* Staged workspace archive: summarize what will be restored so the
+            user knows this is a full-workspace replacement, not just SQL. */}
+        {loadedArchive && (
+          <div
+            className="px-5 py-2 text-[12px] leading-snug text-sky-800 dark:text-sky-300 bg-sky-50 dark:bg-sky-900/20 border-t border-sky-100 dark:border-sky-900/40"
+            role="status"
+          >
+            {loadedArchive.downgraded ? (
+              <>工作区存档来自不兼容的旧版本：仅恢复 SQL 脚本，批注 / 决策 / 布局将重新开始。</>
+            ) : (
+              <>
+                工作区存档
+                {loadedArchive.meta.exportedAt &&
+                  ` · 导出于 ${loadedArchive.meta.exportedAt.slice(0, 16).replace('T', ' ')}`}
+                {loadedArchive.meta.tableCount > 0 && ` · ${loadedArchive.meta.tableCount} 表`}
+                {` · 决策 ${Object.keys(loadedArchive.state.decisions ?? {}).length}`}
+                {` · 手动连线 ${(loadedArchive.state.manualFks ?? []).length}`}
+                {` · 批注 ${Object.keys(loadedArchive.state.fieldNotes ?? {}).length}`}
+                ——导入将恢复完整评审现场（含布局与视角），并替换当前工作区。
+              </>
+            )}
+          </div>
+        )}
 
         {/* Parse-failure feedback: shown instead of silently discarding the
             current diagram; cleared on edit or reopen. */}
@@ -372,9 +447,13 @@ export function SqlInputDialog({ open, onClose }: Props) {
               )}
               onClick={submit}
               disabled={!submittable}
-              title="解析并绘制 (⌘/Ctrl+Enter)"
+              title={
+                loadedArchive
+                  ? '导入存档，恢复评审现场 (⌘/Ctrl+Enter)'
+                  : '解析并绘制 (⌘/Ctrl+Enter)'
+              }
             >
-              解析并绘制
+              {loadedArchive ? '导入存档' : '解析并绘制'}
               <Kbd inverted={submittable}>⌘↵</Kbd>
             </button>
           </div>

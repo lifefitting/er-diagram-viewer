@@ -31,11 +31,20 @@ export interface SchemaState {
    *  scan — logical-link inference runs ONLY for these. Persisted (a refresh
    *  re-derives the same candidates); cleared on a new import (`setSql`). */
   logicalKeys: string[];
+  /** Bumped by `importWorkspace`; keys the DiagramCanvas so an archive import
+   *  remounts it. A fresh mount is what re-arms the one-shot camera restore
+   *  and discards stale in-session positions — i.e. the import replays the
+   *  page-refresh restore path exactly. Transient (never persisted). */
+  workspaceEpoch: number;
   setSql: (sql: string) => void;
   reparse: () => void;
   setPalette: (p: PaletteName) => void;
   /** Replace the picked business keys and re-derive inferred + modules. */
   setLogicalKeys: (keys: string[]) => void;
+  /** Replace the whole workspace with a validated `.erreview` archive payload
+   *  (see exports/archive.ts). Caller must pre-flight `parseSql` on the
+   *  payload's rawSql — this action assumes it parses. */
+  importWorkspace: (state: Partial<AppState> & { rawSql: string }) => void;
 }
 
 export interface DecisionsState {

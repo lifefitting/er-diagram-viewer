@@ -19,19 +19,15 @@ landing 品牌区、README、GH Pages 链接。**在定名之前，对外文案�
 
 ## 阶段一：让评审结论"流转起来"（最高价值，直接延伸闭环）
 
-### 1.1 工作区存档 / 导入 ⭐ 建议第一个做
+### 1.1 工作区存档 / 导入 ✅ 已完成（2026-07-12，feat/workspace-archive）
 
-- **价值**：评审是多轮进行的，sessionStorage 关标签即丢是当前闭环最大的洞；
-  存档文件同时是最小的协作载体——发给同事，对方打开继续评审。
-- **做法**：导出/导入单个 JSON 文件（建议扩展名 `.erreview`），内容 = 持久化 store 的
-  超集：`rawSql` + `decisions` + `manualFks` + `logicalKeys` + `fieldNotes` + 布局
-  （`nodePositions`/`tableWidths`/`manualRoutes`/`deletedTables`/`viewport`）+ 元信息
-  （版本号、导出时间）。导入走 `sanitizePersisted` 同款形状校验（已有，
-  [src/store/persistMigrate.ts](src/store/persistMigrate.ts)），版本不兼容时降级到 rawSql。
-  入口放导出菜单（导出存档）+ 导入对话框（识别 .erreview / JSON）。
-- **工作量**：小-中。**依赖**：无——所有数据已在 store 中且已有校验器。
-- **备注**：sessionStorage 不落盘是有意的安全设计（生产 schema 不留痕）；
-  存档是**用户显式动作**，不违背该设计。
+- **实现**：按原方案落地——`.erreview` = 持久化快照 + 版本元信息
+  （[src/exports/archive.ts](src/exports/archive.ts)）；导入复用 `sanitizePersisted`
+  逐字段校验，persistVersion 不兼容降级仅 rawSql，`parseSql` 预检保护当前工作区；
+  应用侧 `importWorkspace` + `workspaceEpoch` 重挂载画布，重放刷新恢复路径
+  （布局 + 相机逐像素还原）。入口：导出菜单「工作区存档」+ 导入对话框
+  （按内容识别，非 .erreview 扩展名也认）。主题等个人偏好不随存档覆盖。
+- **备注**：sessionStorage 不落盘的安全设计不变——存档是用户显式动作。
 
 ### 1.2 Schema 版本对比（diff）—— DB Refactor 的本命需求
 

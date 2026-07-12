@@ -7,17 +7,10 @@ import { createDisplaySlice } from './displaySlice';
 import { createCanvasSlice } from './canvasSlice';
 import { createHistorySlice } from './historySlice';
 import { createNotesSlice } from './notesSlice';
-import { migratePersisted, sanitizePersisted } from './persistMigrate';
+import { migratePersisted, sanitizePersisted, PERSIST_VERSION } from './persistMigrate';
 
 export type { AppState, DisplayOptions } from './types';
 export { effectiveForeignKeys, visibleSchema } from './selectors';
-
-/** Bump when the persisted shape changes in a breaking way; older snapshots
- *  are dropped on load instead of producing runtime errors.
- *  v2: `decisions` keys switched to canonical (case-insensitive) form via
- *      `canonicalFkKey`. Previous v1 decisions were case-preserving and
- *      would silently fail to apply after the change. */
-const PERSIST_VERSION = 2;
 
 /** sessionStorage key — namespaced so we can ship multiple persist stores
  *  later (e.g. user prefs vs current schema) without collision.
@@ -60,9 +53,31 @@ const DERIVED_OR_TRANSIENT_FIELDS = [
   'canUndo',
   'canRedo',
   'canvasMode',
+  // Canvas remount counter for archive imports — an in-page mechanism only;
+  // rehydrating it would be meaningless (and harmless, but noisy).
+  'workspaceEpoch',
 ] as const satisfies ReadonlyArray<keyof AppState>;
 
 type PersistedAppState = Omit<AppState, (typeof DERIVED_OR_TRANSIENT_FIELDS)[number]>;
+
+/** The persisted subset of a state object: denylisted fields and action
+ *  functions stripped. Shared by the persist middleware's `partialize` and the
+ *  workspace-archive export, so the archive format automatically tracks
+ *  whatever the app persists. */
+function pickPersisted(state: AppState): PersistedAppState {
+  const out: Partial<AppState> = { ...state };
+  for (const k of DERIVED_OR_TRANSIENT_FIELDS) delete out[k];
+  // Strip the action function values too — zustand re-injects them on hydration.
+  for (const key of Object.keys(out) as (keyof AppState)[]) {
+    if (typeof out[key] === 'function') delete out[key];
+  }
+  return out as PersistedAppState;
+}
+
+/** Live snapshot of the persisted subset (for the 工作区存档 export). */
+export function getPersistedSnapshot(): PersistedAppState {
+  return pickPersisted(useApp.getState());
+}
 
 export const useApp = create<AppState>()(
   persist(
@@ -78,15 +93,7 @@ export const useApp = create<AppState>()(
       name: PERSIST_KEY,
       version: PERSIST_VERSION,
       storage: createJSONStorage(() => sessionStorage),
-      partialize: (state) => {
-        const out: Partial<AppState> = { ...state };
-        for (const k of DERIVED_OR_TRANSIENT_FIELDS) delete out[k];
-        // Strip the action function values too — zustand re-injects them on hydration.
-        for (const key of Object.keys(out) as (keyof AppState)[]) {
-          if (typeof out[key] === 'function') delete out[key];
-        }
-        return out as PersistedAppState;
-      },
+      partialize: pickPersisted,
       // Runs ONLY on a version mismatch: drop an incompatible old snapshot down
       // to its rawSql (see persistMigrate). `merge` then validates the result.
       migrate: (persisted, version) => ({
@@ -97,8 +104,7 @@ export const useApp = create<AppState>()(
       // over the initial state. This catches shape drift under the SAME version,
       // which `migrate` never sees. Valid state passes through unchanged, so the
       // normal restore path is identical to zustand's default shallow merge.
-      merge: (persisted, current) =>
-        ({ ...current, ...sanitizePersisted(persisted) }) as AppState,
+      merge: (persisted, current) => ({ ...current, ...sanitizePersisted(persisted) }) as AppState,
       // After hydration, `schema` is still null. The App-level mount effect
       // calls `reparse()` to repopulate the derived data; we don't do it
       // here to avoid races with React's initial render cycle.

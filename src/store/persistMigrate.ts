@@ -20,6 +20,16 @@ import type { AppState } from './types';
 
 type Persisted = Partial<AppState>;
 
+/** Bump when the persisted shape changes in a breaking way; older snapshots
+ *  are dropped on load instead of producing runtime errors.
+ *  v2: `decisions` keys switched to canonical (case-insensitive) form via
+ *      `canonicalFkKey`. Previous v1 decisions were case-preserving and
+ *      would silently fail to apply after the change.
+ *  Lives here (not store/index.ts) so pure consumers — the persist config AND
+ *  the workspace-archive format — share one source of truth without pulling in
+ *  the zustand store instance. */
+export const PERSIST_VERSION = 2;
+
 const PALETTES = new Set(['professional', 'vibrant', 'pastel', 'earth', 'mono']);
 const THEMES = new Set(['light', 'dark', 'system']);
 
