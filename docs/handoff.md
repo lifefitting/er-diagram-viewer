@@ -141,6 +141,12 @@ SQL 文本 ──parseSql──▶ Schema ──mergeShardedTables──▶ 合�
   导入 = 校验（复用 sanitizePersisted）→ `importWorkspace` → `workspaceEpoch` 重挂载
   画布重放刷新恢复路径（布局+相机逐像素还原，Playwright 实测 round-trip）。
   详见 CLAUDE.md「Workspace archive」段与 roadmap 1.1。测试 276 用例 / 32 文件。
+- **roadmap 2.2 批注结构化 ✅**（同分支，未推送）：`FieldNote` + severity/status，
+  气泡级别选择、行标记点分级着色、浮层状态点击流转（不动「写于」时间戳）、
+  报告按级别分组；旧批注两代形状自动升级。
+- **导入对话框双模式重构**（同分支，未推送）：SQL 脚本 / 工作区存档两个显式
+  tab，状态互相独立；上传/拖放按内容路由并自动切 tab；存档 tab 有专属空态
+  拖放区与摘要卡（含 SQL 只读预览、旧版本降级警告）。
 
 ## 6. 开发约定
 

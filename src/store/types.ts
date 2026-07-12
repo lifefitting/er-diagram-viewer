@@ -172,13 +172,25 @@ export interface CanvasState {
   toggleCanvasMode: () => void;
 }
 
+/** Review-note severity（级别）: how serious the finding is. */
+export type NoteSeverity = 'suggest' | 'warn' | 'block';
+/** Review-note status（状态）: where the finding sits in the review loop. */
+export type NoteStatus = 'open' | 'accepted' | 'rejected';
+
 /** One field-level review annotation. */
 export interface FieldNote {
   text: string;
-  /** ISO timestamp of the last edit — part of the review record (exported in
-   *  the 评审报告 and shown in the recent-notes overlay). Empty for legacy
-   *  notes persisted before timestamps existed. */
+  /** ISO timestamp of the last content edit — part of the review record
+   *  (exported in the 评审报告 and shown in the recent-notes overlay). Empty
+   *  for legacy notes persisted before timestamps existed. Status-only flips
+   *  do NOT touch it — it reads as 写于 (written at). */
   updatedAt: string;
+  /** 建议 (suggest) | 警告 (warn) | 阻塞 (block). Legacy notes upgrade to
+   *  'suggest' on load. */
+  severity: NoteSeverity;
+  /** 待处理 (open) | 已采纳 (accepted) | 不采纳 (rejected). Multi-round
+   *  reviews flow notes through these; legacy notes upgrade to 'open'. */
+  status: NoteStatus;
 }
 
 export interface NotesState {
@@ -186,8 +198,18 @@ export interface NotesState {
    *  `fieldNoteKey`). Persisted; cleared on a new import (`setSql`); surfaced
    *  in the 评审报告 export. */
   fieldNotes: Record<string, FieldNote>;
-  /** Set (or clear, with empty text) the review note for one field. */
-  setFieldNote: (table: string, column: string, text: string) => void;
+  /** Set (or clear, with empty text) the review note for one field. Absent
+   *  meta fields keep the note's current values (or the defaults 建议/待处理
+   *  for a new note). */
+  setFieldNote: (
+    table: string,
+    column: string,
+    text: string,
+    meta?: { severity?: NoteSeverity; status?: NoteStatus },
+  ) => void;
+  /** Flip only the status（状态流转）— keeps text, severity AND `updatedAt`
+   *  (the 写于 timestamp records authorship, not triage). */
+  setFieldNoteStatus: (table: string, column: string, status: NoteStatus) => void;
 }
 
 /**

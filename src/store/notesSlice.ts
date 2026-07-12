@@ -1,5 +1,28 @@
 import type { StateCreator } from 'zustand';
-import type { AppState, NotesState } from './types';
+import type { AppState, NotesState, NoteSeverity, NoteStatus } from './types';
+
+/** Display metadata for the three severities（级别）, in escalation order.
+ *  Pure data — shared by the note bubble, the review overlay and the report. */
+export const NOTE_SEVERITIES: ReadonlyArray<{ id: NoteSeverity; label: string }> = [
+  { id: 'suggest', label: '建议' },
+  { id: 'warn', label: '警告' },
+  { id: 'block', label: '阻塞' },
+];
+
+/** Display metadata for the three statuses（状态）, in flow order. */
+export const NOTE_STATUSES: ReadonlyArray<{ id: NoteStatus; label: string }> = [
+  { id: 'open', label: '待处理' },
+  { id: 'accepted', label: '已采纳' },
+  { id: 'rejected', label: '不采纳' },
+];
+
+export const severityLabel = (s: NoteSeverity): string =>
+  NOTE_SEVERITIES.find((x) => x.id === s)?.label ?? s;
+export const statusLabel = (s: NoteStatus): string =>
+  NOTE_STATUSES.find((x) => x.id === s)?.label ?? s;
+
+/** Sort weight: 阻塞 first, 建议 last. */
+export const severityRank = (s: NoteSeverity): number => (s === 'block' ? 0 : s === 'warn' ? 1 : 2);
 
 /** Stable key for a field-level review note. Case-preserving — table/column
  *  names come from the parsed schema, so they're already canonical. */
@@ -31,14 +54,30 @@ export function formatNoteTime(iso: string): string {
  */
 export const createNotesSlice: StateCreator<AppState, [], [], NotesState> = (set) => ({
   fieldNotes: {},
-  setFieldNote(table, column, text) {
+  setFieldNote(table, column, text, meta) {
     const key = fieldNoteKey(table, column);
     const trimmed = text.trim();
     set((s) => {
       const next = { ...s.fieldNotes };
-      if (trimmed) next[key] = { text: trimmed, updatedAt: new Date().toISOString() };
-      else delete next[key];
+      if (trimmed) {
+        const prev = next[key];
+        next[key] = {
+          text: trimmed,
+          updatedAt: new Date().toISOString(),
+          // meta wins → existing value survives an edit → new notes default
+          severity: meta?.severity ?? prev?.severity ?? 'suggest',
+          status: meta?.status ?? prev?.status ?? 'open',
+        };
+      } else delete next[key];
       return { fieldNotes: next };
+    });
+  },
+  setFieldNoteStatus(table, column, status) {
+    const key = fieldNoteKey(table, column);
+    set((s) => {
+      const prev = s.fieldNotes[key];
+      if (!prev || prev.status === status) return s;
+      return { fieldNotes: { ...s.fieldNotes, [key]: { ...prev, status } } };
     });
   },
 });

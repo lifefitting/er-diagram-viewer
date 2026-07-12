@@ -25,7 +25,14 @@ const SNAPSHOT = {
     },
   ],
   logicalKeys: ['out_trade_no'],
-  fieldNotes: { 'a::id': { text: '建议改雪花 ID', updatedAt: '2026-07-12T00:00:00.000Z' } },
+  fieldNotes: {
+    'a::id': {
+      text: '建议改雪花 ID',
+      updatedAt: '2026-07-12T00:00:00.000Z',
+      severity: 'warn',
+      status: 'open',
+    },
+  },
   display: {
     onlyPk: false,
     showType: true,

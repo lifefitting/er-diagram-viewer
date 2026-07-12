@@ -111,20 +111,33 @@ export function sanitizePersisted(raw: unknown): Persisted {
   )
     out.logicalKeys = raw.logicalKeys;
   if (isRecord(raw.fieldNotes)) {
-    // Notes carry a timestamp since they gained one; legacy plain-string
-    // values (pre-timestamp snapshots) are upgraded with an empty updatedAt.
-    const notes: Record<string, { text: string; updatedAt: string }> = {};
+    // Two generations of legacy shapes upgrade in place: plain-string values
+    // (pre-timestamp) and {text, updatedAt} objects (pre-severity/status) —
+    // both land on the defaults 建议 (suggest) / 待处理 (open).
+    const SEVERITIES = new Set(['suggest', 'warn', 'block']);
+    const STATUSES = new Set(['open', 'accepted', 'rejected']);
+    const notes: Record<
+      string,
+      { text: string; updatedAt: string; severity: string; status: string }
+    > = {};
     let valid = true;
     for (const [k, v] of Object.entries(raw.fieldNotes)) {
       if (typeof v === 'string' && v.length > 0) {
-        notes[k] = { text: v, updatedAt: '' };
+        notes[k] = { text: v, updatedAt: '', severity: 'suggest', status: 'open' };
       } else if (
         isRecord(v) &&
         typeof v.text === 'string' &&
         v.text.length > 0 &&
-        (v.updatedAt === undefined || typeof v.updatedAt === 'string')
+        (v.updatedAt === undefined || typeof v.updatedAt === 'string') &&
+        (v.severity === undefined || SEVERITIES.has(v.severity as string)) &&
+        (v.status === undefined || STATUSES.has(v.status as string))
       ) {
-        notes[k] = { text: v.text, updatedAt: (v.updatedAt as string) ?? '' };
+        notes[k] = {
+          text: v.text,
+          updatedAt: (v.updatedAt as string) ?? '',
+          severity: (v.severity as string) ?? 'suggest',
+          status: (v.status as string) ?? 'open',
+        };
       } else {
         valid = false;
         break;

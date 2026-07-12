@@ -87,20 +87,45 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
     expect('manualFks' in sanitizePersisted({ ...valid, manualFks: { 0: fk } })).toBe(false);
   });
 
-  it('keeps valid fieldNotes (upgrading legacy strings) and drops malformed ones', () => {
-    const note = { text: '建议改枚举', updatedAt: '2026-07-11T10:00:00.000Z' };
+  it('keeps valid fieldNotes (upgrading legacy shapes) and drops malformed ones', () => {
+    const note = {
+      text: '建议改枚举',
+      updatedAt: '2026-07-11T10:00:00.000Z',
+      severity: 'warn',
+      status: 'accepted',
+    };
     expect(
       sanitizePersisted({ ...valid, fieldNotes: { 'orders::status': note } }).fieldNotes,
     ).toEqual({ 'orders::status': note });
-    // Legacy pre-timestamp snapshot: plain string → wrapped with empty time.
+    // Legacy pre-timestamp snapshot: plain string → wrapped, defaults 建议/待处理.
     expect(
       sanitizePersisted({ ...valid, fieldNotes: { 'orders::status': '建议改枚举' } }).fieldNotes,
-    ).toEqual({ 'orders::status': { text: '建议改枚举', updatedAt: '' } });
+    ).toEqual({
+      'orders::status': { text: '建议改枚举', updatedAt: '', severity: 'suggest', status: 'open' },
+    });
+    // Legacy pre-severity/status object → upgraded with the same defaults.
+    expect(
+      sanitizePersisted({
+        ...valid,
+        fieldNotes: { 'orders::status': { text: '建议改枚举', updatedAt: '' } },
+      }).fieldNotes,
+    ).toEqual({
+      'orders::status': { text: '建议改枚举', updatedAt: '', severity: 'suggest', status: 'open' },
+    });
     expect('fieldNotes' in sanitizePersisted({ ...valid, fieldNotes: { k: '' } })).toBe(false);
     expect('fieldNotes' in sanitizePersisted({ ...valid, fieldNotes: { k: 3 } })).toBe(false);
     expect('fieldNotes' in sanitizePersisted({ ...valid, fieldNotes: { k: { text: '' } } })).toBe(
       false,
     );
+    // Out-of-domain severity / status values invalidate the whole map.
+    expect(
+      'fieldNotes' in
+        sanitizePersisted({ ...valid, fieldNotes: { k: { text: 'x', severity: 'critical' } } }),
+    ).toBe(false);
+    expect(
+      'fieldNotes' in
+        sanitizePersisted({ ...valid, fieldNotes: { k: { text: 'x', status: 'done' } } }),
+    ).toBe(false);
   });
 
   it('keeps a valid logicalKeys list and drops malformed ones', () => {

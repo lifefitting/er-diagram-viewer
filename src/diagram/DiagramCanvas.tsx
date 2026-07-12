@@ -10,12 +10,9 @@ import {
 } from './buildGraph';
 import { buildStylesheet } from './style';
 import { useApp, effectiveForeignKeys, visibleSchema } from '../store';
-import {
-  manualFkFromDraft,
-  validateManualFk,
-  type ManualFkDraft,
-} from '../store/manualFkValidate';
-import { fieldNoteKey, formatNoteTime } from '../store/notesSlice';
+import { manualFkFromDraft, validateManualFk, type ManualFkDraft } from '../store/manualFkValidate';
+import { fieldNoteKey, formatNoteTime, NOTE_SEVERITIES, NOTE_STATUSES } from '../store/notesSlice';
+import type { FieldNote, NoteSeverity, NoteStatus } from '../store/types';
 import type { Table } from '../parser/types';
 import { colorForTableModule, type ModulesResult } from '../infer/inferModules';
 import {
@@ -301,19 +298,20 @@ export function DiagramCanvas() {
   /** table.name → Set of column names that act as FK source. Drives the FK badge. */
   const fkSourceColumns = useMemo(() => buildFkSourceColumns(effectiveFks), [effectiveFks]);
 
-  /** table.name → columns carrying a review note. Drives the amber row marker. */
+  /** table.name → column → note severity. Drives the row-marker dot (colored
+   *  by 级别: 建议 amber / 警告 orange / 阻塞 rose). */
   const noteColumnsByTable = useMemo(() => {
-    const m = new Map<string, Set<string>>();
-    for (const key of Object.keys(fieldNotes)) {
+    const m = new Map<string, Map<string, NoteSeverity>>();
+    for (const [key, note] of Object.entries(fieldNotes)) {
       const i = key.indexOf('::');
       if (i < 0) continue;
       const t = key.slice(0, i);
-      let set = m.get(t);
-      if (!set) {
-        set = new Set();
-        m.set(t, set);
+      let cols = m.get(t);
+      if (!cols) {
+        cols = new Map();
+        m.set(t, cols);
       }
-      set.add(key.slice(i + 2));
+      cols.set(key.slice(i + 2), note.severity ?? 'suggest');
     }
     return m;
   }, [fieldNotes]);
@@ -350,7 +348,10 @@ export function DiagramCanvas() {
     setNoteEditor({
       table,
       col,
-      x: Math.min(Math.max(rr.left - rect.left + Math.min(150, rr.width / 2), 156), rect.width - 156),
+      x: Math.min(
+        Math.max(rr.left - rect.left + Math.min(150, rr.width / 2), 156),
+        rect.width - 156,
+      ),
       y: Math.min(Math.max(rr.bottom - rect.top + 6, 8), rect.height - 170),
     });
   };
@@ -998,9 +999,7 @@ export function DiagramCanvas() {
     // Drop route overrides whose edge no longer exists (edited SQL etc.). Safe
     // to prune against the live cy edges only because deleting a table already
     // clears its edges' overrides (see hideTables).
-    useApp.getState().pruneManualRoutes(
-      cy.edges().map((e) => e.data('fkKey') as string),
-    );
+    useApp.getState().pruneManualRoutes(cy.edges().map((e) => e.data('fkKey') as string));
     // Reset history only when the node SET actually changed. Undo snapshots
     // reference node ids, so they stay valid across a visibility-only rebuild
     // (FK accept/reject, showLowConfidence toggle) — the user keeps their
@@ -1464,7 +1463,10 @@ export function DiagramCanvas() {
     const onMove = (mv: MouseEvent) => {
       const zoom = cy.zoom();
       if (zoom === 0) return;
-      const dModel = { x: (mv.clientX - startMouse.x) / zoom, y: (mv.clientY - startMouse.y) / zoom };
+      const dModel = {
+        x: (mv.clientX - startMouse.x) / zoom,
+        y: (mv.clientY - startMouse.y) / zoom,
+      };
       if (!moved && Math.abs(dModel.x) + Math.abs(dModel.y) > 1) moved = true;
       if (!moved) return;
       const next = dragSegment(startPoly, segIndex, dModel);
@@ -1487,7 +1489,8 @@ export function DiagramCanvas() {
       if (moved) {
         manualMoveRef.current = true;
         useApp.getState().setManualRoute(edge.data('fkKey') as string, lastRoute);
-        if (!getIsApplying()) pushHistory(captureSnapshot(cy, tableWidthsRef.current, manualMoveRef.current));
+        if (!getIsApplying())
+          pushHistory(captureSnapshot(cy, tableWidthsRef.current, manualMoveRef.current));
       }
       scheduleHideHandles();
     };
@@ -1661,10 +1664,7 @@ export function DiagramCanvas() {
           const pan = cy.pan();
           const zoom = cy.zoom();
           return (
-            <svg
-              className="pointer-events-none absolute inset-0 h-full w-full"
-              aria-hidden="true"
-            >
+            <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
               {loops.map((el) => {
                 const e = el as EdgeSingular;
                 const pts = routeToPoints(e.data('routePoints') as string).map((p) => ({
@@ -1710,14 +1710,30 @@ export function DiagramCanvas() {
                       stroke={color}
                       strokeWidth={(selected ? 3 : 1.6) * zoom}
                       strokeDasharray={
-                        isLogical ? `${2 * zoom} ${4 * zoom}` : pending ? `${6 * zoom} ${4 * zoom}` : undefined
+                        isLogical
+                          ? `${2 * zoom} ${4 * zoom}`
+                          : pending
+                            ? `${6 * zoom} ${4 * zoom}`
+                            : undefined
                       }
                       opacity={opacity}
                     />
                     {isLogical ? (
                       <>
-                        <circle cx={pts[0].x} cy={pts[0].y} r={3 * zoom} fill={color} opacity={opacity} />
-                        <circle cx={last.x} cy={last.y} r={3 * zoom} fill={color} opacity={opacity} />
+                        <circle
+                          cx={pts[0].x}
+                          cy={pts[0].y}
+                          r={3 * zoom}
+                          fill={color}
+                          opacity={opacity}
+                        />
+                        <circle
+                          cx={last.x}
+                          cy={last.y}
+                          r={3 * zoom}
+                          fill={color}
+                          opacity={opacity}
+                        />
                       </>
                     ) : (
                       <polygon
@@ -1894,10 +1910,9 @@ export function DiagramCanvas() {
           col={noteEditor.col}
           x={noteEditor.x}
           y={noteEditor.y}
-          initial={fieldNotes[fieldNoteKey(noteEditor.table, noteEditor.col)]?.text ?? ''}
-          updatedAt={fieldNotes[fieldNoteKey(noteEditor.table, noteEditor.col)]?.updatedAt}
-          onSave={(text) => {
-            setFieldNote(noteEditor.table, noteEditor.col, text);
+          note={fieldNotes[fieldNoteKey(noteEditor.table, noteEditor.col)] ?? null}
+          onSave={(text, meta) => {
+            setFieldNote(noteEditor.table, noteEditor.col, text, meta);
             setNoteEditor(null);
           }}
           onClose={() => setNoteEditor(null)}
@@ -1915,7 +1930,11 @@ export function DiagramCanvas() {
           <button
             type="button"
             className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"
-            title={selectedEdges.size === 1 ? '删除这条手动连线' : `删除这 ${selectedEdges.size} 条手动连线`}
+            title={
+              selectedEdges.size === 1
+                ? '删除这条手动连线'
+                : `删除这 ${selectedEdges.size} 条手动连线`
+            }
             onClick={deleteSelectedEdges}
           >
             <TrashIcon />
@@ -1958,14 +1977,15 @@ export function DiagramCanvas() {
  * Review-note bubble (评审批注): a small anchored editor for one field's note.
  * Uncontrolled by the store while typing; commits on 保存 (or ⌘/Ctrl+Enter),
  * discards on Esc / outside click. Saving empty text clears the note.
+ * Severity（级别）is always pickable; status（状态）only appears when editing
+ * an EXISTING note — a fresh finding is 待处理 by definition.
  */
 function FieldNoteBubble({
   table,
   col,
   x,
   y,
-  initial,
-  updatedAt,
+  note,
   onSave,
   onClose,
 }: {
@@ -1973,13 +1993,17 @@ function FieldNoteBubble({
   col: string;
   x: number;
   y: number;
-  initial: string;
-  updatedAt?: string;
-  onSave: (text: string) => void;
+  note: FieldNote | null;
+  onSave: (text: string, meta: { severity: NoteSeverity; status: NoteStatus }) => void;
   onClose: () => void;
 }) {
+  const initial = note?.text ?? '';
+  const updatedAt = note?.updatedAt;
   const [text, setText] = useState(initial);
+  const [severity, setSeverity] = useState<NoteSeverity>(note?.severity ?? 'suggest');
+  const [status, setStatus] = useState<NoteStatus>(note?.status ?? 'open');
   const ref = useRef<HTMLDivElement | null>(null);
+  const save = (t: string) => onSave(t, { severity, status });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2029,17 +2053,45 @@ function FieldNoteBubble({
         }
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onSave(text);
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save(text);
         }}
       />
-      <div className="mt-1 flex items-center gap-1.5">
+      <div className="mt-1 flex flex-col gap-1 px-0.5">
+        <NoteMetaRow label="级别">
+          {NOTE_SEVERITIES.map((opt) => (
+            <NoteMetaChip
+              key={opt.id}
+              active={severity === opt.id}
+              activeClass={SEVERITY_CHIP[opt.id]}
+              onClick={() => setSeverity(opt.id)}
+            >
+              {opt.label}
+            </NoteMetaChip>
+          ))}
+        </NoteMetaRow>
+        {note && (
+          <NoteMetaRow label="状态">
+            {NOTE_STATUSES.map((opt) => (
+              <NoteMetaChip
+                key={opt.id}
+                active={status === opt.id}
+                activeClass={STATUS_CHIP[opt.id]}
+                onClick={() => setStatus(opt.id)}
+              >
+                {opt.label}
+              </NoteMetaChip>
+            ))}
+          </NoteMetaRow>
+        )}
+      </div>
+      <div className="mt-1.5 flex items-center gap-1.5">
         <span className="text-[9.5px] text-ink-300 dark:text-inkd-500">⌘↵ 保存 · Esc 取消</span>
         <span className="ml-auto flex items-center gap-1.5">
           {initial && (
             <button
               type="button"
               className="h-6 rounded border border-rose-200 px-2 text-[11px] text-rose-600 hover:bg-rose-50 dark:border-rose-700/50 dark:text-rose-400 dark:hover:bg-rose-900/30"
-              onClick={() => onSave('')}
+              onClick={() => save('')}
             >
               删除批注
             </button>
@@ -2047,13 +2099,64 @@ function FieldNoteBubble({
           <button
             type="button"
             className="h-6 rounded bg-amber-500 px-2.5 text-[11px] font-medium text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500"
-            onClick={() => onSave(text)}
+            onClick={() => save(text)}
           >
             保存
           </button>
         </span>
       </div>
     </div>
+  );
+}
+
+/** Active-state chip styling per severity — matches the row-marker dot colors. */
+const SEVERITY_CHIP: Record<NoteSeverity, string> = {
+  suggest: 'bg-amber-500 text-white border-amber-500 dark:bg-amber-600 dark:border-amber-600',
+  warn: 'bg-orange-500 text-white border-orange-500 dark:bg-orange-600 dark:border-orange-600',
+  block: 'bg-rose-500 text-white border-rose-500 dark:bg-rose-600 dark:border-rose-600',
+};
+
+const STATUS_CHIP: Record<NoteStatus, string> = {
+  open: 'bg-ink-700 text-white border-ink-700 dark:bg-inkd-700 dark:text-inkd-50 dark:border-inkd-700',
+  accepted:
+    'bg-emerald-600 text-white border-emerald-600 dark:bg-emerald-700 dark:border-emerald-700',
+  rejected: 'bg-ink-400 text-white border-ink-400 dark:bg-inkd-500 dark:border-inkd-500',
+};
+
+function NoteMetaRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1">
+      <span className="w-7 shrink-0 text-[10px] text-ink-400 dark:text-inkd-500">{label}</span>
+      <span className="flex gap-1">{children}</span>
+    </div>
+  );
+}
+
+function NoteMetaChip({
+  active,
+  activeClass,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  activeClass: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      className={
+        'h-5 rounded-full border px-2 text-[10.5px] leading-none transition-colors ' +
+        (active
+          ? activeClass
+          : 'border-ink-200 text-ink-500 hover:bg-ink-50 dark:border-inkd-300 dark:text-inkd-600 dark:hover:bg-inkd-200')
+      }
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }
 

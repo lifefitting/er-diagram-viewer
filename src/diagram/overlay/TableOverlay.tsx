@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import type { DisplayOptions } from '../../store';
+import type { NoteSeverity } from '../../store/types';
 import type { NodePos, OverlayState } from '../types';
 import { ColumnRow } from './ColumnRow';
 import { TableHeader } from './TableHeader';
@@ -34,7 +35,8 @@ interface TableOverlayProps {
    *  (`side` = which connect dot was grabbed). */
   onConnectStart?: (colName: string, side: 'left' | 'right', e: React.MouseEvent) => void;
   /** Columns of this table that carry a review note (评审批注). */
-  noteColumns?: Set<string>;
+  /** column → note severity（级别）; colors the row-marker dot. */
+  noteColumns?: Map<string, NoteSeverity>;
   /** Click on a field row: open its review-note bubble. */
   onOpenNote?: (colName: string, e: React.MouseEvent) => void;
 }
@@ -143,7 +145,7 @@ export function TableOverlay({
               isFk={fkColumns?.has(c.name) ?? false}
               query={query}
               onConnectStart={onConnectStart && ((side, e) => onConnectStart(c.name, side, e))}
-              hasNote={noteColumns?.has(c.name) ?? false}
+              noteSeverity={noteColumns?.get(c.name) ?? null}
               onOpenNote={onOpenNote && ((e) => onOpenNote(c.name, e))}
             />
           ))}

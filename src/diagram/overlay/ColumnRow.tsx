@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import type { Column, Table } from '../../parser/types';
+import type { NoteSeverity } from '../../store/types';
 import { columnRoleBadge, FIELD_ROW_HEIGHT, shortType } from '../buildGraph';
 import { highlightMatch } from './highlight';
 
@@ -16,8 +17,9 @@ interface ColumnRowProps {
    *  curve leaves the card horizontally on that side. Absent (pan mode) hides
    *  the dots. */
   onConnectStart?: (side: 'left' | 'right', e: React.MouseEvent) => void;
-  /** This field has a review note (评审批注) — show the amber marker. */
-  hasNote?: boolean;
+  /** This field has a review note (评审批注) — show the marker dot, colored by
+   *  级别: 建议 amber / 警告 orange / 阻塞 rose. Null = no note. */
+  noteSeverity?: NoteSeverity | null;
   /** Click on the row: open the review-note bubble for this field. Also
    *  enables the hover highlight that signals the row is clickable. */
   onOpenNote?: (e: React.MouseEvent) => void;
@@ -41,9 +43,10 @@ export function ColumnRow({
   isFk,
   query = '',
   onConnectStart,
-  hasNote = false,
+  noteSeverity = null,
   onOpenNote,
 }: ColumnRowProps) {
+  const hasNote = noteSeverity !== null;
   const roleBadge = columnRoleBadge(col, table, showIndex);
   const isPk = roleBadge === 'PK';
   const typeText = showType ? shortType(col.rawType) : '';
@@ -99,7 +102,12 @@ export function ColumnRow({
           {highlightMatch(col.name, query)}
           {hasNote && (
             <span
-              className="ml-1 inline-block h-[6px] w-[6px] rounded-full bg-amber-500 align-middle"
+              className={clsx(
+                'ml-1 inline-block h-[6px] w-[6px] rounded-full align-middle',
+                noteSeverity === 'block' && 'bg-rose-500',
+                noteSeverity === 'warn' && 'bg-orange-500',
+                noteSeverity === 'suggest' && 'bg-amber-500',
+              )}
               aria-label="有评审批注"
             />
           )}
