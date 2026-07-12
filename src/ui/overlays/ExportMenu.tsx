@@ -197,7 +197,9 @@ export function ExportMenu() {
         className={
           'inline-flex items-center gap-1.5 h-8 pl-2 pr-2.5 rounded-md text-xs font-medium ' +
           'bg-ink-800 text-white hover:bg-ink-900 ' +
-          'dark:bg-inkd-700 dark:text-inkd-50 dark:hover:bg-inkd-800 dark:hover:text-white ' +
+          // Dark mode is a LIGHT button (inkd-700/800 are light steps), so the
+          // text must stay dark in every state — hover:text-white was a bug.
+          'dark:bg-inkd-700 dark:text-inkd-50 dark:hover:bg-inkd-800 ' +
           'disabled:bg-ink-100 disabled:text-ink-400 dark:disabled:bg-inkd-200 dark:disabled:text-inkd-500 ' +
           'disabled:cursor-not-allowed transition-colors'
         }
@@ -262,7 +264,7 @@ export function ExportMenu() {
               <div className="mt-1 flex justify-end">
                 <button
                   type="button"
-                  className="h-6 rounded bg-ink-800 px-2.5 text-[11px] font-medium text-white hover:bg-ink-900 dark:bg-inkd-700 dark:hover:bg-inkd-800"
+                  className="h-6 rounded bg-ink-800 px-2.5 text-[11px] font-medium text-white hover:bg-ink-900 dark:bg-inkd-700 dark:text-inkd-50 dark:hover:bg-inkd-800"
                   onClick={exportReport}
                 >
                   导出报告

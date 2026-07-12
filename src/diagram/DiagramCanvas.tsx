@@ -65,9 +65,12 @@ function applyEdgeTheme(cy: Core, isDark: boolean): void {
     cy.edges().forEach((e) => {
       if (isDark) {
         const c = (e.data('colorDark') as string) || (e.data('color') as string);
-        e.style({ 'line-color': c, 'target-arrow-color': c });
+        // source-arrow too: logical (undirected) edges draw circle endpoints
+        // on BOTH ends — leaving the source at data(color) kept the light-
+        // canvas hue on the dark canvas.
+        e.style({ 'line-color': c, 'target-arrow-color': c, 'source-arrow-color': c });
       } else {
-        e.removeStyle('line-color target-arrow-color');
+        e.removeStyle('line-color target-arrow-color source-arrow-color');
       }
     });
   });

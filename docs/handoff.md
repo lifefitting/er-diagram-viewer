@@ -127,11 +127,16 @@ SQL 文本 ──parseSql──▶ Schema ──mergeShardedTables──▶ 合�
 - TODO-fix-bugs 两个文件删除，roadmap/handoff 移入 docs/。
 - **连线触点交互打磨**（呼吸增强、22px 磁性热区、拉线光标状态机——hover 触点
   用自定义拉线光标、拖动中退回箭头）。
-- **「专业」模块配色（新默认）**：低饱和 12 色，OKLCH 取色 + 机器校验
+- **「沉稳」模块配色（新默认，id `professional`）**：低饱和 12 色，OKLCH 取色 + 机器校验
   （明度带 / C≥0.10 / Machado CVD 相邻 ΔE≥36 / 对比度 / 白字 AA），暗色画布
   用每槽手工分阶的 `ModuleColor.headerDark`（不走自动 HSL 提亮），设计记录见
   [palette-professional.md](palette-professional.md)；工具栏配色入口改为调色盘
   图标按钮（色条预览只在下拉里）。既有配色与已持久化选择不受影响。
+  配色命名统一收敛为克制的双字调性词：沉稳 / 明快 / 柔和 / 大地 / 单色。
+- **暗色对比度修复一批**：暗色下主按钮为浅色底（inkd-700/800），写死 `text-white`
+  的按钮（导出报告、解析并绘制、错误页刷新等）改为暗色文字；`applyEdgeTheme`
+  补上 `source-arrow-color`——逻辑关联（无向边）两端圆点此前在暗色下仍用亮色
+  画布的颜色。
 
 ## 6. 开发约定
 

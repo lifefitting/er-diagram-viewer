@@ -187,7 +187,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-ink-100 dark:border-inkd-300">
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-md bg-ink-800 dark:bg-inkd-700 text-white flex items-center justify-center">
+            <div className="w-7 h-7 rounded-md bg-ink-800 dark:bg-inkd-700 text-white dark:text-inkd-50 flex items-center justify-center">
               <DatabaseIcon />
             </div>
             <div>
@@ -367,7 +367,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
               className={clsx(
                 'inline-flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-md font-medium transition-colors',
                 submittable
-                  ? 'bg-ink-800 dark:bg-inkd-700 text-white hover:bg-ink-900 dark:hover:bg-inkd-800'
+                  ? 'bg-ink-800 dark:bg-inkd-700 text-white dark:text-inkd-50 hover:bg-ink-900 dark:hover:bg-inkd-800'
                   : 'bg-ink-200 dark:bg-inkd-200 text-ink-400 dark:text-inkd-500 cursor-not-allowed',
               )}
               onClick={submit}
@@ -429,7 +429,9 @@ function Kbd({ children, inverted }: { children: React.ReactNode; inverted?: boo
       className={clsx(
         'inline-block px-1 py-0 text-[10px] font-sans rounded border align-middle leading-[14px]',
         inverted
-          ? 'bg-white/15 text-white/90 border-white/20'
+          ? // Sits inside the primary button: dark bg in light mode (white-ish
+            // kbd), LIGHT bg in dark mode (inkd-700) — so the kbd flips too.
+            'bg-white/15 text-white/90 border-white/20 dark:bg-black/10 dark:text-inkd-50/80 dark:border-black/20'
           : 'bg-white dark:bg-inkd-200 text-ink-400 dark:text-inkd-600 border-ink-200 dark:border-inkd-400',
       )}
     >

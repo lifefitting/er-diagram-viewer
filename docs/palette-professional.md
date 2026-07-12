@@ -1,4 +1,4 @@
-# 「专业」配色（professional palette）设计记录
+# 「沉稳」配色（id `professional`）设计记录
 
 > 2026-07-12 引入，`src/infer/inferModules.ts` 中 `MODULE_PALETTES.professional`。
 > 本文记录设计约束、验证方法与最终数值，便于日后调整时按同一标准复核。

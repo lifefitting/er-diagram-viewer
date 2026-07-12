@@ -19,12 +19,14 @@ interface Props {
   onOpenImport: () => void;
 }
 
+// Labels are deliberately understated two-character tone words (品牌语气：克制) —
+// they describe the color temperament, not sell it.
 const PALETTE_OPTIONS: Array<{ id: PaletteName; label: string; description: string }> = [
-  { id: 'professional', label: '专业', description: '低饱和沉稳色，明暗双模式校验' },
-  { id: 'vibrant', label: '鲜艳', description: '高饱和，适合演示' },
-  { id: 'pastel', label: '粉彩', description: '柔和粉色调，适合长时间阅读' },
-  { id: 'earth', label: '大地', description: '棕橄榄暖色，适合复古风' },
-  { id: 'mono', label: '单色', description: '蓝灰阶梯，适合打印' },
+  { id: 'professional', label: '沉稳', description: '低饱和，评审默认' },
+  { id: 'vibrant', label: '明快', description: '高饱和，适合演示' },
+  { id: 'pastel', label: '柔和', description: '浅色调，适合久读' },
+  { id: 'earth', label: '大地', description: '暖褐色调' },
+  { id: 'mono', label: '单色', description: '蓝灰阶，适合打印' },
 ];
 
 const THEME_OPTIONS: Array<{ id: ThemePreference; label: string; icon: () => JSX.Element }> = [
