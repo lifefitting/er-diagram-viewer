@@ -92,6 +92,24 @@ export function MoonIcon() {
   );
 }
 
+// Painter's palette — the toolbar's module-color-scheme trigger.
+export function PaletteIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M8 1.8a6.2 6.2 0 1 0 0 12.4c1 0 1.5-.6 1.5-1.3 0-.6-.3-.9-.3-1.4 0-.8.6-1.3 1.5-1.3h1.5c1.2 0 2-.9 2-2.2A6.3 6.3 0 0 0 8 1.8z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <circle cx="5.1" cy="6" r="0.9" fill="currentColor" />
+      <circle cx="8.3" cy="4.6" r="0.9" fill="currentColor" />
+      <circle cx="11.1" cy="6.4" r="0.9" fill="currentColor" />
+      <circle cx="4.9" cy="9.4" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function MonitorIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>

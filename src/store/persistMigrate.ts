@@ -20,7 +20,7 @@ import type { AppState } from './types';
 
 type Persisted = Partial<AppState>;
 
-const PALETTES = new Set(['vibrant', 'pastel', 'earth', 'mono']);
+const PALETTES = new Set(['professional', 'vibrant', 'pastel', 'earth', 'mono']);
 const THEMES = new Set(['light', 'dark', 'system']);
 
 function isFiniteNum(v: unknown): v is number {
@@ -28,7 +28,12 @@ function isFiniteNum(v: unknown): v is number {
 }
 
 function isPt(v: unknown): boolean {
-  return typeof v === 'object' && v !== null && isFiniteNum((v as { x: unknown }).x) && isFiniteNum((v as { y: unknown }).y);
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    isFiniteNum((v as { x: unknown }).x) &&
+    isFiniteNum((v as { y: unknown }).y)
+  );
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -62,7 +67,10 @@ function isManualFk(v: unknown): boolean {
 /** {x,y,zoom} with finite numbers. */
 function isViewport(o: unknown): boolean {
   return (
-    isRecord(o) && isFiniteNum(o.x) && isFiniteNum(o.y) && isFiniteNum((o as { zoom: unknown }).zoom)
+    isRecord(o) &&
+    isFiniteNum(o.x) &&
+    isFiniteNum(o.y) &&
+    isFiniteNum((o as { zoom: unknown }).zoom)
   );
 }
 
@@ -80,7 +88,10 @@ export function sanitizePersisted(raw: unknown): Persisted {
   if (THEMES.has(raw.theme as string)) out.theme = raw.theme;
   if (typeof raw.sidebarCollapsed === 'boolean') out.sidebarCollapsed = raw.sidebarCollapsed;
 
-  if (isRecord(raw.decisions) && Object.values(raw.decisions).every((v) => v === 'accept' || v === 'reject'))
+  if (
+    isRecord(raw.decisions) &&
+    Object.values(raw.decisions).every((v) => v === 'accept' || v === 'reject')
+  )
     out.decisions = raw.decisions;
   if (Array.isArray(raw.manualFks) && raw.manualFks.every(isManualFk))
     out.manualFks = raw.manualFks;

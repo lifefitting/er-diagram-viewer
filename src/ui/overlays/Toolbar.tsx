@@ -9,6 +9,7 @@ import {
   ClearIcon,
   MonitorIcon,
   MoonIcon,
+  PaletteIcon,
   SearchIcon,
   SunIcon,
   UploadIcon,
@@ -19,6 +20,7 @@ interface Props {
 }
 
 const PALETTE_OPTIONS: Array<{ id: PaletteName; label: string; description: string }> = [
+  { id: 'professional', label: '专业', description: '低饱和沉稳色，明暗双模式校验' },
   { id: 'vibrant', label: '鲜艳', description: '高饱和，适合演示' },
   { id: 'pastel', label: '粉彩', description: '柔和粉色调，适合长时间阅读' },
   { id: 'earth', label: '大地', description: '棕橄榄暖色，适合复古风' },
@@ -280,22 +282,25 @@ function PaletteDropdown({ current }: { current: PaletteName }) {
 
   return (
     <div ref={wrapRef} className="relative">
+      {/* Icon-only trigger (matches ThemeSwitcher): the palette glyph says
+          "colors live here" without pinning a strip of swatches to the toolbar;
+          the per-palette previews stay inside the dropdown options. */}
       <button
         type="button"
         className={clsx(
-          'inline-flex items-center gap-1.5 h-8 px-2 rounded-md text-[11px] font-medium',
-          'text-ink-700 dark:text-inkd-700',
+          'inline-flex items-center justify-center h-8 w-8 rounded-md',
+          'text-ink-600 dark:text-inkd-600',
           'hover:bg-ink-50 dark:hover:bg-inkd-200',
+          'hover:text-ink-800 dark:hover:text-inkd-800',
           'transition-colors',
         )}
         onClick={() => setOpen((v) => !v)}
-        title="切换模块色系"
+        title={`模块色系: ${currentOpt.label}`}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label="切换模块色系"
       >
-        <ColorStrip colors={MODULE_PALETTES[current].slice(0, 5)} />
-        <span>{currentOpt.label}</span>
-        <span className="text-ink-400 dark:text-inkd-500 text-[10px]">▾</span>
+        <PaletteIcon />
       </button>
       {open && (
         <div

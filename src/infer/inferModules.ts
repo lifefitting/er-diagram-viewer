@@ -10,6 +10,11 @@ export interface ModuleColor {
   tint: string;
   /** Header text color (white / dark depending on contrast). */
   text: string;
+  /** Dark-canvas edge color, hand-stepped for the dark background. When absent
+   *  the edge falls back to the automatic HSL lift (`darkEdgeColor`), which
+   *  preserves saturation and can turn saturated dark hues neon — palettes
+   *  designed for both modes should provide explicit steps instead. */
+  headerDark?: string;
 }
 
 export interface ModuleInfo {
@@ -31,15 +36,111 @@ export interface ModulesResult {
   ordered: ModuleInfo[];
 }
 
-export type PaletteName = 'vibrant' | 'pastel' | 'earth' | 'mono';
+export type PaletteName = 'professional' | 'vibrant' | 'pastel' | 'earth' | 'mono';
 
 /**
- * Four hand-tuned palettes, each with 12 distinct slots. All palettes keep header
+ * Five hand-tuned palettes, each with 12 distinct slots. All palettes keep header
  * text legible (white on dark headers, ink on light headers) and pair a darker
  * `header` with a lighter `border` and a near-white `tint` so the same module
  * color renders consistently across the table card, the edge line, and chips.
  */
 export const MODULE_PALETTES: Record<PaletteName, ModuleColor[]> = {
+  // Professional (default): desaturated OKLCH-designed hues for review work.
+  // Machine-validated, not eyeballed (see docs/palette-professional.md):
+  //   - headers sit in OKLCH L 0.43–0.58, C ≥ 0.10 (chromatic, never neon);
+  //   - white header text ≥ 4.5:1 on every slot (WCAG AA for 13px text);
+  //   - slot order maximizes the minimum adjacent CVD ΔE (Machado protan/
+  //     deutan ≥ 36) so the biggest modules get the most distinguishable hues;
+  //   - `headerDark` is a separately stepped dark-canvas set (OKLCH L
+  //     0.48–0.67, ≥ 3:1 on #0b1020) — NOT the automatic HSL lift, which turns
+  //     saturated darks neon. Blue/violet slots are additionally tiered by
+  //     lightness because they collapse together under deuteranopia.
+  professional: [
+    {
+      header: '#0c5788',
+      border: '#7daad1',
+      tint: '#ebf5fe',
+      text: '#ffffff',
+      headerDark: '#3580ba',
+    }, // denim
+    {
+      header: '#5b7328',
+      border: '#9aad79',
+      tint: '#f0f6e9',
+      text: '#ffffff',
+      headerDark: '#6e8935',
+    }, // olive
+    {
+      header: '#81437c',
+      border: '#c094bb',
+      tint: '#fbeff9',
+      text: '#ffffff',
+      headerDark: '#a665a1',
+    }, // plum
+    {
+      header: '#974a24',
+      border: '#cd967e',
+      tint: '#fff0ea',
+      text: '#ffffff',
+      headerDark: '#cc7a54',
+    }, // terracotta
+    {
+      header: '#17749f',
+      border: '#75adcd',
+      tint: '#e8f6fe',
+      text: '#ffffff',
+      headerDark: '#3d9dce',
+    }, // steel
+    {
+      header: '#008660',
+      border: '#74b49c',
+      tint: '#e9f8f1',
+      text: '#ffffff',
+      headerDark: '#37a885',
+    }, // sea
+    {
+      header: '#634d99',
+      border: '#a89ccf',
+      tint: '#f4f1ff',
+      text: '#ffffff',
+      headerDark: '#6e5aa4',
+    }, // violet
+    {
+      header: '#246e3f',
+      border: '#81b38e',
+      tint: '#ebf7ee',
+      text: '#ffffff',
+      headerDark: '#56a66f',
+    }, // pine
+    {
+      header: '#36589b',
+      border: '#8ba5d4',
+      tint: '#eef4ff',
+      text: '#ffffff',
+      headerDark: '#6288cf',
+    }, // indigo
+    {
+      header: '#903b46',
+      border: '#cf9295',
+      tint: '#feeff0',
+      text: '#ffffff',
+      headerDark: '#cf737b',
+    }, // burgundy
+    {
+      header: '#906606',
+      border: '#bda06e',
+      tint: '#faf2e6',
+      text: '#ffffff',
+      headerDark: '#a4771c',
+    }, // bronze
+    {
+      header: '#9e4e69',
+      border: '#cd91a3',
+      tint: '#ffeff3',
+      text: '#ffffff',
+      headerDark: '#cb738f',
+    }, // rose
+  ],
   // Vibrant: saturated Tailwind 600-tier hues. Default / loudest.
   vibrant: [
     { header: '#2563eb', border: '#60a5fa', tint: '#dbeafe', text: '#ffffff' }, // blue
@@ -102,9 +203,16 @@ export const MODULE_PALETTES: Record<PaletteName, ModuleColor[]> = {
   ],
 };
 
-export const DEFAULT_PALETTE: PaletteName = 'vibrant';
+export const DEFAULT_PALETTE: PaletteName = 'professional';
 
 const FALLBACK_COLORS: Record<PaletteName, ModuleColor> = {
+  professional: {
+    header: '#4b5563',
+    border: '#9ca3af',
+    tint: '#f1f3f5',
+    text: '#ffffff',
+    headerDark: '#8b95a5',
+  },
   vibrant: { header: '#3f465e', border: '#7a82a0', tint: '#eceef2', text: '#ffffff' },
   pastel: { header: '#cbd5e1', border: '#e2e8f0', tint: '#f8fafc', text: '#1f2937' },
   earth: { header: '#57534e', border: '#a8a29e', tint: '#f5f5f4', text: '#fafaf9' },

@@ -8,12 +8,25 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
     theme: 'dark',
     sidebarCollapsed: true,
     decisions: { 'a.x->b.y': 'accept' },
-    display: { onlyPk: false, showType: true, showComment: true, showIndex: true, showLowConfidence: false, showLogicalLinks: true, showManualLinks: true },
+    display: {
+      onlyPk: false,
+      showType: true,
+      showComment: true,
+      showIndex: true,
+      showLowConfidence: false,
+      showLogicalLinks: true,
+      showManualLinks: true,
+    },
     collapsed: { a: true },
     tableWidths: { a: 320 },
     deletedTables: { 't:b': true },
     nodePositions: { 't:a': { x: 10, y: 20 } },
-    manualRoutes: { 'a.x->b.y': [{ x: 0, y: 0 }, { x: 5, y: 5 }] },
+    manualRoutes: {
+      'a.x->b.y': [
+        { x: 0, y: 0 },
+        { x: 5, y: 5 },
+      ],
+    },
     viewport: { x: -100, y: 50, zoom: 1.5 },
   };
 
@@ -28,13 +41,19 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
   });
 
   it('drops a viewport with a non-finite zoom but keeps an explicit null', () => {
-    expect('viewport' in sanitizePersisted({ ...valid, viewport: { x: 1, y: 2, zoom: NaN } })).toBe(false);
+    expect('viewport' in sanitizePersisted({ ...valid, viewport: { x: 1, y: 2, zoom: NaN } })).toBe(
+      false,
+    );
     expect(sanitizePersisted({ ...valid, viewport: null }).viewport).toBeNull();
   });
 
   it('drops manualRoutes whose values are not point arrays', () => {
-    expect('manualRoutes' in sanitizePersisted({ ...valid, manualRoutes: { k: 'x,y' } })).toBe(false);
-    expect('manualRoutes' in sanitizePersisted({ ...valid, manualRoutes: { k: [{ x: 1 }] } })).toBe(false);
+    expect('manualRoutes' in sanitizePersisted({ ...valid, manualRoutes: { k: 'x,y' } })).toBe(
+      false,
+    );
+    expect('manualRoutes' in sanitizePersisted({ ...valid, manualRoutes: { k: [{ x: 1 }] } })).toBe(
+      false,
+    );
   });
 
   it('keeps well-formed manualFks and drops malformed ones', () => {
@@ -47,13 +66,23 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
     };
     expect(sanitizePersisted({ ...valid, manualFks: [fk] }).manualFks).toEqual([fk]);
     // optional kind: absent and known values pass, junk drops the field
-    expect(sanitizePersisted({ ...valid, manualFks: [{ ...fk, kind: 'logical' }] }).manualFks).toEqual([{ ...fk, kind: 'logical' }]);
-    expect('manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, kind: 'sideways' }] })).toBe(false);
+    expect(
+      sanitizePersisted({ ...valid, manualFks: [{ ...fk, kind: 'logical' }] }).manualFks,
+    ).toEqual([{ ...fk, kind: 'logical' }]);
+    expect(
+      'manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, kind: 'sideways' }] }),
+    ).toBe(false);
     // wrong source tag
-    expect('manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, source: 'inferred' }] })).toBe(false);
+    expect(
+      'manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, source: 'inferred' }] }),
+    ).toBe(false);
     // empty column list / missing table
-    expect('manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, fromColumns: [] }] })).toBe(false);
-    expect('manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, toTable: '' }] })).toBe(false);
+    expect(
+      'manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, fromColumns: [] }] }),
+    ).toBe(false);
+    expect(
+      'manualFks' in sanitizePersisted({ ...valid, manualFks: [{ ...fk, toTable: '' }] }),
+    ).toBe(false);
     // not an array
     expect('manualFks' in sanitizePersisted({ ...valid, manualFks: { 0: fk } })).toBe(false);
   });
@@ -80,12 +109,15 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
     ]);
     expect(sanitizePersisted({ ...valid, logicalKeys: [] }).logicalKeys).toEqual([]);
     expect('logicalKeys' in sanitizePersisted({ ...valid, logicalKeys: ['a', 3] })).toBe(false);
-    expect('logicalKeys' in sanitizePersisted({ ...valid, logicalKeys: 'out_trade_no' })).toBe(false);
+    expect('logicalKeys' in sanitizePersisted({ ...valid, logicalKeys: 'out_trade_no' })).toBe(
+      false,
+    );
   });
 
   it('drops an invalid theme / palette / partial display', () => {
     expect('theme' in sanitizePersisted({ ...valid, theme: 'neon' })).toBe(false);
     expect('palette' in sanitizePersisted({ ...valid, palette: 'rainbow' })).toBe(false);
+    expect(sanitizePersisted({ ...valid, palette: 'professional' }).palette).toBe('professional');
     expect('display' in sanitizePersisted({ ...valid, display: { onlyPk: true } })).toBe(false);
   });
 

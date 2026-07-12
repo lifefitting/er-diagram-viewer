@@ -28,7 +28,7 @@ overlay）+ dagre（分层布局）+ Tailwind 3 + Vite/Vitest，Bun 作包管理
 ```bash
 bun install          # 依赖（bun.lock）
 bun run dev          # 开发（HMR 对 cytoscape 不可靠，见下文"验证方式"）
-bun run test         # vitest（262 用例 / 30 文件，全绿）；勿用裸 `bun test`
+bun run test         # vitest（270 用例 / 31 文件，全绿）；勿用裸 `bun test`
 bun run typecheck    # tsc -b --noEmit（strict，0 error）
 bun run lint         # eslint（当前 7 条 warning，均为既有 as any / exhaustive-deps）
 bun run build && bun run preview   # 端到端验证用这个，不要信 HMR
@@ -125,6 +125,13 @@ SQL 文本 ──parseSql──▶ Schema ──mergeShardedTables──▶ 合�
   这是每次发版前必须复核的底线（验证方法：构建后用浏览器直接打开
   dist-single/er-diagram-viewer.html，跑一遍导入→批注→导出）；
 - TODO-fix-bugs 两个文件删除，roadmap/handoff 移入 docs/。
+- **连线触点交互打磨**（呼吸增强、22px 磁性热区、拉线光标状态机——hover 触点
+  用自定义拉线光标、拖动中退回箭头）。
+- **「专业」模块配色（新默认）**：低饱和 12 色，OKLCH 取色 + 机器校验
+  （明度带 / C≥0.10 / Machado CVD 相邻 ΔE≥36 / 对比度 / 白字 AA），暗色画布
+  用每槽手工分阶的 `ModuleColor.headerDark`（不走自动 HSL 提亮），设计记录见
+  [palette-professional.md](palette-professional.md)；工具栏配色入口改为调色盘
+  图标按钮（色条预览只在下拉里）。既有配色与已持久化选择不受影响。
 
 ## 6. 开发约定
 

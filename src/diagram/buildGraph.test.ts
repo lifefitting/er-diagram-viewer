@@ -133,6 +133,51 @@ describe('logical (business-key) edges', () => {
   });
 });
 
+describe('edge dark-canvas color (colorDark)', () => {
+  const schema = schemaOf([
+    table('users', [col('id', { isPrimaryKey: true })], ['id']),
+    table('orders', [col('id', { isPrimaryKey: true }), col('user_id')], ['id']),
+  ]);
+  const fk: ForeignKey = {
+    fromTable: 'orders',
+    fromColumns: ['user_id'],
+    toTable: 'users',
+    toColumns: ['id'],
+    source: 'inferred',
+    confidence: 'high',
+  };
+
+  function edgeColors(palette: 'professional' | 'vibrant') {
+    const modules = inferModules(schema, [fk], palette);
+    const { elements } = buildElements(schema, [fk], {
+      modules,
+      collapsed: {},
+      tableWidths: {},
+      display: DISPLAY,
+      decisions: {},
+    });
+    const edge = elements.find((el) => el.group === 'edges')!;
+    return { modules, color: edge.data.color as string, colorDark: edge.data.colorDark as string };
+  }
+
+  it("prefers the module's hand-stepped headerDark over the automatic lift", () => {
+    const { modules, color, colorDark } = edgeColors('professional');
+    const mod = modules.modules.get(modules.byTable.get('orders')!)!;
+    expect(color).toBe(mod.color.header);
+    expect(colorDark).toBe(mod.color.headerDark);
+    expect(colorDark).not.toBe(color);
+  });
+
+  it('falls back to the lightness lift for palettes without explicit dark steps', () => {
+    const { modules, colorDark } = edgeColors('vibrant');
+    const mod = modules.modules.get(modules.byTable.get('orders')!)!;
+    expect(mod.color.headerDark).toBeUndefined();
+    // The lift keeps already-light colors and only raises dark ones — either
+    // way the result must parse as a hex color.
+    expect(colorDark).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+});
+
 describe('onlyPk box sizing & row offsets (finding 2)', () => {
   const orders = table(
     'orders',
