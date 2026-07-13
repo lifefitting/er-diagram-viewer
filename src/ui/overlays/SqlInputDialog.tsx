@@ -3,6 +3,12 @@ import clsx from 'clsx';
 import { useApp } from '../../store';
 import { parseSql } from '../../parser';
 import { SAMPLE_ECOMMERCE, SAMPLE_BLOG } from '../../samples';
+import {
+  looksLikeArchive,
+  parseWorkspaceArchive,
+  ARCHIVE_EXTENSION,
+  type ParseArchiveResult,
+} from '../../exports/archive';
 
 interface Props {
   open: boolean;
@@ -13,6 +19,28 @@ interface LoadedFile {
   name: string;
   size: number;
 }
+
+/** A successfully parsed `.erreview` file staged for import. */
+type LoadedArchive = Extract<ParseArchiveResult, { ok: true }>;
+
+/** The archive tab's staged file: the parsed payload plus where it came from. */
+interface StagedArchive {
+  archive: LoadedArchive;
+  fileName: string;
+  size: number;
+}
+
+/** The dialog's two explicit entry modes（导入什么）. */
+type ImportMode = 'sql' | 'archive';
+
+const MODE_TABS: Array<{ id: ImportMode; label: string; hint: string }> = [
+  { id: 'sql', label: 'SQL 脚本', hint: '粘贴 DDL · 上传 .sql 文件 · 或将文件拖拽到任意位置' },
+  {
+    id: 'archive',
+    label: '工作区存档',
+    hint: '导入 .erreview 存档，恢复完整评审现场（含批注 / 决策 / 布局 / 视角）',
+  },
+];
 
 const SAMPLES: Array<{ id: string; label: string; description: string; sql: string }> = [
   {
@@ -41,9 +69,16 @@ const PLACEHOLDER =
 
 export function SqlInputDialog({ open, onClose }: Props) {
   const setSql = useApp((s) => s.setSql);
+  const importWorkspace = useApp((s) => s.importWorkspace);
   const currentSql = useApp((s) => s.rawSql);
   const [text, setText] = useState(currentSql);
   const [loadedFile, setLoadedFile] = useState<LoadedFile | null>(null);
+  // Which entry the user is on. The two modes hold independent state: `text`
+  // belongs to the SQL tab, `staged` to the archive tab — switching tabs
+  // never clobbers the other side's work-in-progress.
+  const [mode, setMode] = useState<ImportMode>('sql');
+  // The archive tab's staged `.erreview` file, parsed + validated.
+  const [staged, setStaged] = useState<StagedArchive | null>(null);
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +94,8 @@ export function SqlInputDialog({ open, onClose }: Props) {
     if (open) {
       setText(currentSql);
       setLoadedFile(null);
+      setStaged(null);
+      setMode('sql');
       setSamplesOpen(false);
       setError(null);
     }
@@ -74,24 +111,31 @@ export function SqlInputDialog({ open, onClose }: Props) {
   }, [open]);
 
   const submit = useCallback(() => {
-    if (!text.trim()) return;
-    // Pre-flight parse before committing: `setSql` unconditionally clears
-    // decisions, layout and the recycle bin, so garbage input (or a parser
-    // throw) must not be allowed to wipe the current workspace.
+    const archive = mode === 'archive' ? staged?.archive : null;
+    if (mode === 'archive' && !archive) return;
+    if (mode === 'sql' && !text.trim()) return;
+    // Pre-flight parse before committing: `setSql` / `importWorkspace`
+    // unconditionally replace decisions, layout and the recycle bin, so
+    // garbage input (or a parser throw) must not be allowed to wipe the
+    // current workspace.
     try {
-      const parsed = parseSql(text);
+      const sql = archive ? archive.state.rawSql : text;
+      const parsed = parseSql(sql);
       if (parsed.tables.length === 0) {
-        setError('未解析出任何表：请确认粘贴的是 CREATE TABLE / ALTER TABLE 脚本。当前图保持不变。');
+        setError(
+          '未解析出任何表：请确认粘贴的是 CREATE TABLE / ALTER TABLE 脚本。当前图保持不变。',
+        );
         return;
       }
-      setSql(text);
+      if (archive) importWorkspace(archive.state);
+      else setSql(text);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(`解析失败：${msg} —— 当前图保持不变。`);
       return;
     }
     onClose();
-  }, [setSql, text, onClose]);
+  }, [setSql, importWorkspace, mode, staged, text, onClose]);
 
   // Keyboard shortcuts: Esc closes (or first closes the samples dropdown if
   // open), ⌘/Ctrl+Enter submits. Bound at window level so the textarea,
@@ -124,10 +168,34 @@ export function SqlInputDialog({ open, onClose }: Props) {
     return () => window.removeEventListener('mousedown', onDown);
   }, [samplesOpen]);
 
+  // One file handler for both tabs: content decides the destination（按内容
+  // 路由）— an archive lands on the 工作区存档 tab, SQL lands on the SQL tab,
+  // switching the dialog there so the user always sees where their file went.
   const handleFile = useCallback(async (file: File) => {
     const content = await file.text();
+    // Sniff by content (SQL never starts with `{`), not extension — a
+    // re-saved or mailed archive may arrive as .json/.txt.
+    if (looksLikeArchive(content)) {
+      const parsed = parseWorkspaceArchive(content);
+      if (parsed.ok) {
+        setStaged({ archive: parsed, fileName: file.name, size: file.size });
+        setMode('archive');
+        setError(null);
+        return;
+      }
+      if (file.name.endsWith(ARCHIVE_EXTENSION)) {
+        // Definitely meant as an archive — surface why it can't load instead
+        // of dumping JSON into the SQL editor.
+        setMode('archive');
+        setError(`无法导入存档：${parsed.error}`);
+        return;
+      }
+      // JSON-ish but not ours: fall through and let the SQL parser complain.
+    }
     setText(content);
     setLoadedFile({ name: file.name, size: file.size });
+    setMode('sql');
+    setError(null);
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
 
@@ -161,7 +229,8 @@ export function SqlInputDialog({ open, onClose }: Props) {
     return { lines: text.split('\n').length, chars: text.length };
   }, [text]);
 
-  const submittable = text.trim().length > 0;
+  const submittable = mode === 'archive' ? staged !== null : text.trim().length > 0;
+  const modeTab = MODE_TABS.find((t) => t.id === mode)!;
 
   if (!open) return null;
 
@@ -184,137 +253,176 @@ export function SqlInputDialog({ open, onClose }: Props) {
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       >
-        {/* Header */}
+        {/* Header: title + the two explicit entry tabs. What gets imported is
+            a MODE the user picks (or the dropped file picks for them), not a
+            guess buried inside one shared flow. */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-ink-100 dark:border-inkd-300">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-md bg-ink-800 dark:bg-inkd-700 text-white flex items-center justify-center">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-7 h-7 shrink-0 rounded-md bg-ink-800 dark:bg-inkd-700 text-white dark:text-inkd-50 flex items-center justify-center">
               <DatabaseIcon />
             </div>
-            <div>
+            <div className="min-w-0">
               <h2
                 id="sql-dialog-title"
                 className="text-sm font-semibold text-ink-800 dark:text-inkd-800 leading-tight"
               >
-                导入 SQL 脚本
+                导入
               </h2>
-              <div className="text-[11px] text-ink-400 dark:text-inkd-500 leading-tight mt-0.5">
-                粘贴 DDL · 上传 .sql 文件 · 或将文件拖拽到任意位置
+              <div className="text-[11px] text-ink-400 dark:text-inkd-500 leading-tight mt-0.5 truncate">
+                {modeTab.hint}
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            className="w-8 h-8 rounded-md text-ink-400 hover:text-ink-700 hover:bg-ink-50 dark:text-inkd-500 dark:hover:text-inkd-800 dark:hover:bg-inkd-200 flex items-center justify-center transition-colors"
-            onClick={onClose}
-            aria-label="关闭对话框"
-            title="关闭 (Esc)"
-          >
-            <CloseIcon />
-          </button>
+          <div className="flex items-center gap-2">
+            <div
+              className="flex rounded-md bg-ink-100/70 p-0.5 dark:bg-inkd-200/70"
+              role="tablist"
+              aria-label="导入类型"
+            >
+              {MODE_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === tab.id}
+                  className={clsx(
+                    'h-7 rounded px-3 text-[12px] font-medium transition-colors',
+                    mode === tab.id
+                      ? 'bg-white text-ink-800 shadow-sm dark:bg-inkd-100 dark:text-inkd-800'
+                      : 'text-ink-500 hover:text-ink-700 dark:text-inkd-600 dark:hover:text-inkd-800',
+                  )}
+                  onClick={() => {
+                    setMode(tab.id);
+                    setError(null);
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="w-8 h-8 rounded-md text-ink-400 hover:text-ink-700 hover:bg-ink-50 dark:text-inkd-500 dark:hover:text-inkd-800 dark:hover:bg-inkd-200 flex items-center justify-center transition-colors"
+              onClick={onClose}
+              aria-label="关闭对话框"
+              title="关闭 (Esc)"
+            >
+              <CloseIcon />
+            </button>
+          </div>
         </div>
 
-        {/* Toolbar */}
-        <div className="flex items-center gap-2 px-5 py-2.5 border-b border-ink-100 dark:border-inkd-300 bg-ink-50/60 dark:bg-inkd-50/60">
-          <SecondaryButton onClick={onPickFile} icon={<UploadIcon />}>
-            上传文件
-          </SecondaryButton>
+        {/* Shared hidden file input — the SQL toolbar's 上传文件 and the
+            archive tab's 选择存档文件 both funnel through handleFile, which
+            routes by content. */}
+        <input
+          type="file"
+          accept=".sql,.ddl,.txt,.erreview,.json,text/plain,application/json"
+          hidden
+          ref={fileInputRef}
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            if (f) await handleFile(f);
+            // Reset so picking the same file again still fires change.
+            e.target.value = '';
+          }}
+        />
 
-          <div className="relative" ref={samplesMenuRef}>
-            <SecondaryButton
-              onClick={() => setSamplesOpen((v) => !v)}
-              icon={<SparklesIcon />}
-              chevron
-              active={samplesOpen}
-            >
-              加载样例
+        {/* Toolbar (SQL 脚本 tab only) */}
+        {mode === 'sql' && (
+          <div className="flex items-center gap-2 px-5 py-2.5 border-b border-ink-100 dark:border-inkd-300 bg-ink-50/60 dark:bg-inkd-50/60">
+            <SecondaryButton onClick={onPickFile} icon={<UploadIcon />}>
+              上传文件
             </SecondaryButton>
-            {samplesOpen && (
-              <div className="absolute left-0 top-full mt-1 w-64 rounded-md bg-white dark:bg-inkd-100 shadow-lg ring-1 ring-black/5 dark:ring-white/10 py-1 z-10">
-                {SAMPLES.map((sample) => (
-                  <button
-                    key={sample.id}
-                    type="button"
-                    className="w-full text-left px-3 py-2 hover:bg-ink-50 dark:hover:bg-inkd-200 transition-colors"
-                    onClick={() => {
-                      setText(sample.sql);
-                      setLoadedFile(null);
-                      setSamplesOpen(false);
-                      requestAnimationFrame(() => textareaRef.current?.focus());
-                    }}
-                  >
-                    <div className="text-sm font-medium text-ink-800 dark:text-inkd-800">
-                      {sample.label}
-                    </div>
-                    <div className="text-[11px] text-ink-400 dark:text-inkd-500">
-                      {sample.description}
-                    </div>
-                  </button>
-                ))}
+
+            <div className="relative" ref={samplesMenuRef}>
+              <SecondaryButton
+                onClick={() => setSamplesOpen((v) => !v)}
+                icon={<SparklesIcon />}
+                chevron
+                active={samplesOpen}
+              >
+                加载样例
+              </SecondaryButton>
+              {samplesOpen && (
+                <div className="absolute left-0 top-full mt-1 w-64 rounded-md bg-white dark:bg-inkd-100 shadow-lg ring-1 ring-black/5 dark:ring-white/10 py-1 z-10">
+                  {SAMPLES.map((sample) => (
+                    <button
+                      key={sample.id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-ink-50 dark:hover:bg-inkd-200 transition-colors"
+                      onClick={() => {
+                        setText(sample.sql);
+                        setLoadedFile(null);
+                        setSamplesOpen(false);
+                        requestAnimationFrame(() => textareaRef.current?.focus());
+                      }}
+                    >
+                      <div className="text-sm font-medium text-ink-800 dark:text-inkd-800">
+                        {sample.label}
+                      </div>
+                      <div className="text-[11px] text-ink-400 dark:text-inkd-500">
+                        {sample.description}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {text.length > 0 && (
+              <SecondaryButton
+                onClick={() => {
+                  setText('');
+                  setLoadedFile(null);
+                  textareaRef.current?.focus();
+                }}
+                icon={<TrashIcon />}
+                variant="ghost"
+              >
+                清空
+              </SecondaryButton>
+            )}
+
+            <div className="flex-1" />
+
+            {loadedFile && (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-[11px]">
+                <FileIcon />
+                <span className="font-mono">{loadedFile.name}</span>
+                <span className="opacity-60">· {formatBytes(loadedFile.size)}</span>
               </div>
             )}
           </div>
+        )}
 
-          {text.length > 0 && (
-            <SecondaryButton
-              onClick={() => {
-                setText('');
-                setLoadedFile(null);
-                textareaRef.current?.focus();
-              }}
-              icon={<TrashIcon />}
-              variant="ghost"
-            >
-              清空
-            </SecondaryButton>
-          )}
-
-          <div className="flex-1" />
-
-          {loadedFile && (
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-[11px]">
-              <FileIcon />
-              <span className="font-mono">{loadedFile.name}</span>
-              <span className="opacity-60">· {formatBytes(loadedFile.size)}</span>
-            </div>
-          )}
-
-          <input
-            type="file"
-            accept=".sql,.ddl,.txt,text/plain"
-            hidden
-            ref={fileInputRef}
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (f) await handleFile(f);
-              // Reset so picking the same file again still fires change.
-              e.target.value = '';
-            }}
-          />
-        </div>
-
-        {/* Editor */}
+        {/* Body: SQL editor OR archive panel, by mode */}
         <div className="relative flex-1 min-h-[280px]">
-          <textarea
-            ref={textareaRef}
-            className={clsx(
-              'absolute inset-0 w-full h-full px-5 py-4 font-mono text-[13px] leading-[1.55] resize-none',
-              'bg-transparent text-ink-800 dark:text-inkd-800',
-              'placeholder:text-ink-300 dark:placeholder:text-inkd-500',
-              'focus:outline-none',
-            )}
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              // Manual edits invalidate the "loaded from file" badge and any
-              // stale parse-failure message.
-              if (loadedFile) setLoadedFile(null);
-              if (error) setError(null);
-            }}
-            placeholder={PLACEHOLDER}
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-          />
+          {mode === 'sql' ? (
+            <textarea
+              ref={textareaRef}
+              className={clsx(
+                'absolute inset-0 w-full h-full px-5 py-4 font-mono text-[13px] leading-[1.55] resize-none',
+                'bg-transparent text-ink-800 dark:text-inkd-800',
+                'placeholder:text-ink-300 dark:placeholder:text-inkd-500',
+                'focus:outline-none',
+              )}
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                // Manual edits invalidate the "loaded from file" badge and any
+                // stale parse-failure message.
+                if (loadedFile) setLoadedFile(null);
+                if (error) setError(null);
+              }}
+              placeholder={PLACEHOLDER}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+            />
+          ) : (
+            <ArchivePanel staged={staged} onPickFile={onPickFile} onClear={() => setStaged(null)} />
+          )}
           {dragOver && (
             <div className="absolute inset-3 rounded-lg border-2 border-dashed border-ink-400 dark:border-inkd-500 bg-white/95 dark:bg-inkd-50/95 flex flex-col items-center justify-center gap-2 pointer-events-none">
               <div className="w-12 h-12 rounded-full bg-ink-100 dark:bg-inkd-200 flex items-center justify-center text-ink-700 dark:text-inkd-800">
@@ -323,7 +431,9 @@ export function SqlInputDialog({ open, onClose }: Props) {
               <div className="text-sm font-medium text-ink-800 dark:text-inkd-800">
                 释放以加载文件
               </div>
-              <div className="text-[11px] text-ink-400 dark:text-inkd-500">.sql / .ddl / .txt</div>
+              <div className="text-[11px] text-ink-400 dark:text-inkd-500">
+                .sql / .ddl / .txt / .erreview 存档
+              </div>
             </div>
           )}
         </div>
@@ -342,16 +452,23 @@ export function SqlInputDialog({ open, onClose }: Props) {
         {/* Footer */}
         <div className="flex items-center justify-between px-5 py-3 border-t border-ink-100 dark:border-inkd-300 bg-ink-50/60 dark:bg-inkd-50/60 rounded-b-xl">
           <div className="flex items-center gap-3 text-[11px] text-ink-400 dark:text-inkd-500">
-            <span>
-              <span className="font-mono text-ink-600 dark:text-inkd-700">{stats.lines}</span> 行
-            </span>
-            <span className="opacity-40">·</span>
-            <span>
-              <span className="font-mono text-ink-600 dark:text-inkd-700">
-                {stats.chars.toLocaleString()}
-              </span>{' '}
-              字符
-            </span>
+            {mode === 'sql' ? (
+              <>
+                <span>
+                  <span className="font-mono text-ink-600 dark:text-inkd-700">{stats.lines}</span>{' '}
+                  行
+                </span>
+                <span className="opacity-40">·</span>
+                <span>
+                  <span className="font-mono text-ink-600 dark:text-inkd-700">
+                    {stats.chars.toLocaleString()}
+                  </span>{' '}
+                  字符
+                </span>
+              </>
+            ) : (
+              <span>导入存档将替换当前工作区（批注 / 决策 / 布局一并替换）</span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -367,17 +484,117 @@ export function SqlInputDialog({ open, onClose }: Props) {
               className={clsx(
                 'inline-flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-md font-medium transition-colors',
                 submittable
-                  ? 'bg-ink-800 dark:bg-inkd-700 text-white hover:bg-ink-900 dark:hover:bg-inkd-800'
+                  ? 'bg-ink-800 dark:bg-inkd-700 text-white dark:text-inkd-50 hover:bg-ink-900 dark:hover:bg-inkd-800'
                   : 'bg-ink-200 dark:bg-inkd-200 text-ink-400 dark:text-inkd-500 cursor-not-allowed',
               )}
               onClick={submit}
               disabled={!submittable}
-              title="解析并绘制 (⌘/Ctrl+Enter)"
+              title={
+                mode === 'archive'
+                  ? '导入存档，恢复评审现场 (⌘/Ctrl+Enter)'
+                  : '解析并绘制 (⌘/Ctrl+Enter)'
+              }
             >
-              解析并绘制
+              {mode === 'archive' ? '导入存档' : '解析并绘制'}
               <Kbd inverted={submittable}>⌘↵</Kbd>
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── archive tab body ──────────────────────────────────────────────────── */
+
+/**
+ * The 工作区存档 tab: an explicit, dedicated surface for restoring a review
+ * session — either an empty drop-target state or a summary card of the staged
+ * archive (what will be restored, from when, plus a read-only peek at its SQL).
+ */
+function ArchivePanel({
+  staged,
+  onPickFile,
+  onClear,
+}: {
+  staged: StagedArchive | null;
+  onPickFile: () => void;
+  onClear: () => void;
+}) {
+  if (!staged) {
+    return (
+      <div className="absolute inset-0 flex items-center justify-center p-6">
+        <div className="flex w-[420px] max-w-full flex-col items-center gap-3 rounded-xl border-2 border-dashed border-ink-200 px-6 py-10 text-center dark:border-inkd-300">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-ink-100 text-ink-700 dark:bg-inkd-200 dark:text-inkd-800">
+            <DropIcon />
+          </div>
+          <div className="text-sm font-medium text-ink-800 dark:text-inkd-800">
+            导入工作区存档（{ARCHIVE_EXTENSION}）
+          </div>
+          <div className="text-[11.5px] leading-relaxed text-ink-400 dark:text-inkd-500">
+            存档由「导出 → 工作区存档」生成，包含 SQL、批注、关系决策、
+            手动连线与画布布局——导入后从上次中断的地方继续评审。
+          </div>
+          <SecondaryButton onClick={onPickFile} icon={<UploadIcon />}>
+            选择存档文件
+          </SecondaryButton>
+          <div className="text-[10.5px] text-ink-300 dark:text-inkd-500">
+            也可以直接把文件拖到这个窗口
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const { archive, fileName, size } = staged;
+  const st = archive.state;
+  const metaRows: Array<[string, string]> = [
+    [
+      '导出时间',
+      archive.meta.exportedAt ? archive.meta.exportedAt.slice(0, 16).replace('T', ' ') : '未知',
+    ],
+    ['应用版本', archive.meta.appVersion || '未知'],
+    ['表', String(archive.meta.tableCount || '?')],
+    ['关系决策', String(Object.keys(st.decisions ?? {}).length)],
+    ['手动连线', String((st.manualFks ?? []).length)],
+    ['字段批注', String(Object.keys(st.fieldNotes ?? {}).length)],
+  ];
+
+  return (
+    <div className="absolute inset-0 overflow-y-auto p-5">
+      <div className="mx-auto flex w-[560px] max-w-full flex-col gap-3">
+        <div className="rounded-lg border border-ink-100 bg-ink-50/40 p-3 dark:border-inkd-300 dark:bg-inkd-50/40">
+          <div className="flex items-center gap-1.5 text-[12px] text-ink-800 dark:text-inkd-800">
+            <FileIcon />
+            <span className="font-mono font-medium truncate">{fileName}</span>
+            <span className="text-ink-400 dark:text-inkd-500">· {formatBytes(size)}</span>
+            <button
+              type="button"
+              className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[11px] text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:text-inkd-500 dark:hover:bg-inkd-200 dark:hover:text-inkd-800"
+              onClick={onClear}
+            >
+              重新选择
+            </button>
+          </div>
+          <dl className="mt-2 grid grid-cols-3 gap-x-4 gap-y-1.5">
+            {metaRows.map(([k, v]) => (
+              <div key={k} className="flex flex-col">
+                <dt className="text-[10px] text-ink-400 dark:text-inkd-500">{k}</dt>
+                <dd className="text-[12px] tabular-nums text-ink-800 dark:text-inkd-800">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+        {archive.downgraded && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11.5px] leading-snug text-amber-800 dark:border-amber-700/50 dark:bg-amber-900/25 dark:text-amber-300">
+            存档来自不兼容的旧版本：仅恢复 SQL 脚本，批注 / 决策 / 布局将重新开始。
+          </div>
+        )}
+        <div className="min-h-0">
+          <div className="mb-1 text-[10.5px] text-ink-400 dark:text-inkd-500">SQL 预览（只读）</div>
+          <pre className="max-h-44 overflow-auto rounded-md border border-ink-100 bg-white px-3 py-2 font-mono text-[11.5px] leading-[1.5] text-ink-700 dark:border-inkd-300 dark:bg-inkd-50 dark:text-inkd-700">
+            {st.rawSql}
+          </pre>
         </div>
       </div>
     </div>
@@ -429,7 +646,9 @@ function Kbd({ children, inverted }: { children: React.ReactNode; inverted?: boo
       className={clsx(
         'inline-block px-1 py-0 text-[10px] font-sans rounded border align-middle leading-[14px]',
         inverted
-          ? 'bg-white/15 text-white/90 border-white/20'
+          ? // Sits inside the primary button: dark bg in light mode (white-ish
+            // kbd), LIGHT bg in dark mode (inkd-700) — so the kbd flips too.
+            'bg-white/15 text-white/90 border-white/20 dark:bg-black/10 dark:text-inkd-50/80 dark:border-black/20'
           : 'bg-white dark:bg-inkd-200 text-ink-400 dark:text-inkd-600 border-ink-200 dark:border-inkd-400',
       )}
     >

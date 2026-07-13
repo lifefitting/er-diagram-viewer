@@ -24,6 +24,7 @@ export default function App() {
   const schema = useApp((s) => s.schema);
   const sidebarCollapsed = useApp((s) => s.sidebarCollapsed);
   const setSql = useApp((s) => s.setSql);
+  const workspaceEpoch = useApp((s) => s.workspaceEpoch);
 
   useEffect(() => {
     // Three startup paths, in priority order:
@@ -75,7 +76,11 @@ export default function App() {
           {schema && schema.tables.length > 0 ? (
             <ErrorBoundary>
               <Suspense fallback={<CanvasLoading />}>
-                <DiagramCanvas />
+                {/* keyed so an archive import (importWorkspace) remounts the
+                    canvas — a fresh mount re-arms the one-shot camera restore
+                    and drops stale in-session positions, replaying the
+                    page-refresh restore path against the imported layout. */}
+                <DiagramCanvas key={workspaceEpoch} />
               </Suspense>
             </ErrorBoundary>
           ) : (

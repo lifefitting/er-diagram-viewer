@@ -1,5 +1,7 @@
 import type { ForeignKey, Schema } from '../parser/types';
 import type { InferredFK } from '../infer/inferForeignKeys';
+import type { NoteSeverity, NoteStatus } from '../store/types';
+import { severityLabel, statusLabel } from '../store/notesSlice';
 import { canonicalFkKey } from '../parser/utils';
 
 /**
@@ -20,8 +22,21 @@ export interface ReportInput {
    *  from the sections above and called out at the end). */
   deletedTableNames: string[];
   /** Field-level review annotations, keyed `table::column` (fieldNoteKey);
-   *  each carries the text and WHEN it was written. */
-  fieldNotes?: Record<string, { text: string; updatedAt: string }>;
+   *  each carries the text, WHEN it was written, plus 级别/状态 (absent on
+   *  legacy notes → 建议/待处理). */
+  fieldNotes?: Record<
+    string,
+    { text: string; updatedAt: string; severity?: NoteSeverity; status?: NoteStatus }
+  >;
+  /** Section toggles (export dialog): a reviewer may want a "facts + opinions
+   *  only" report without the engine's candidate lists. Both default true. */
+  include?: {
+    /** 推断外键候选 section (accepted/pending/rejected engine candidates). */
+    inferredFkCandidates?: boolean;
+    /** Engine-scanned logical-link candidates (manual logical links are the
+     *  user's own assertions and are always listed). */
+    logicalCandidates?: boolean;
+  };
   /** Injectable for deterministic tests. */
   generatedAt?: Date;
 }
@@ -29,6 +44,8 @@ export interface ReportInput {
 export function buildReviewReport(input: ReportInput): string {
   const { schema, inferred, decisions, manualFks, deletedTableNames } = input;
   const fieldNotes = input.fieldNotes ?? {};
+  const includeFkCandidates = input.include?.inferredFkCandidates ?? true;
+  const includeLogicalCandidates = input.include?.logicalCandidates ?? true;
   const when = input.generatedAt ?? new Date();
 
   const hiddenLower = new Set(deletedTableNames.map((n) => n.toLowerCase()));
@@ -56,10 +73,16 @@ export function buildReviewReport(input: ReportInput): string {
   lines.push('');
   lines.push(`- 生成时间：${formatDate(when)}`);
   lines.push(`- 表：${schema.tables.length} 张`);
-  lines.push(
-    `- 关系：显式外键 ${explicit.length} · 推断外键候选 ${fkCandidates.length} · ` +
-      `逻辑关联候选 ${logicalCandidates.length} · 手动添加 ${manualVisible.length}`,
-  );
+  const summaryParts = [`显式外键 ${explicit.length}`];
+  if (includeFkCandidates) summaryParts.push(`推断外键候选 ${fkCandidates.length}`);
+  if (includeLogicalCandidates) summaryParts.push(`逻辑关联候选 ${logicalCandidates.length}`);
+  summaryParts.push(`手动添加 ${manualVisible.length}`);
+  lines.push(`- 关系：${summaryParts.join(' · ')}`);
+  const omitted = [
+    !includeFkCandidates ? '推断外键候选' : '',
+    !includeLogicalCandidates ? '逻辑关联候选' : '',
+  ].filter(Boolean);
+  if (omitted.length) lines.push(`- 本报告按导出选项省略：${omitted.join('、')}`);
   lines.push('');
 
   lines.push('## 物理外键（DDL 显式声明）');
@@ -70,21 +93,24 @@ export function buildReviewReport(input: ReportInput): string {
   }
   lines.push('');
 
-  lines.push('## 推断外键候选');
-  lines.push('');
-  if (fkCandidates.length === 0) lines.push('（无）');
-  for (const fk of fkCandidates) {
-    lines.push(
-      `- [${stateLabel(fk)}] ${path(fk, '→')} · 置信度 ${fk.confidence}` +
-        (fk.reason ? ` · ${fk.reason}` : ''),
-    );
+  if (includeFkCandidates) {
+    lines.push('## 推断外键候选');
+    lines.push('');
+    if (fkCandidates.length === 0) lines.push('（无）');
+    for (const fk of fkCandidates) {
+      lines.push(
+        `- [${stateLabel(fk)}] ${path(fk, '→')} · 置信度 ${fk.confidence}` +
+          (fk.reason ? ` · ${fk.reason}` : ''),
+      );
+    }
+    lines.push('');
   }
-  lines.push('');
 
   lines.push('## 逻辑关联（业务键，无物理约束）');
   lines.push('');
-  if (logicalCandidates.length === 0 && manualLogical.length === 0) lines.push('（无）');
-  for (const fk of logicalCandidates) {
+  const logicalShown = includeLogicalCandidates ? logicalCandidates : [];
+  if (logicalShown.length === 0 && manualLogical.length === 0) lines.push('（无）');
+  for (const fk of logicalShown) {
     lines.push(
       `- [${stateLabel(fk)}] ${path(fk, '~')} · 置信度 ${fk.confidence}` +
         (fk.reason ? ` · ${fk.reason}` : ''),
@@ -103,9 +129,11 @@ export function buildReviewReport(input: ReportInput): string {
   }
   lines.push('');
 
-  // Field-level review annotations, grouped by table in schema order — each
-  // with the timestamp it was written (the review is a PROCESS record). Notes
-  // on recycle-bin'd tables are held back with the other excluded material.
+  // Field-level review annotations, grouped by 级别 (阻塞 → 警告 → 建议) with
+  // each note's 状态 inline — a multi-round review reads this section as its
+  // work queue. Within a severity group, schema table order then column order.
+  // Notes on recycle-bin'd tables are held back with the other excluded
+  // material.
   const noteEntries = Object.entries(fieldNotes)
     .map(([key, note]) => {
       const i = key.indexOf('::');
@@ -116,33 +144,58 @@ export function buildReviewReport(input: ReportInput): string {
             column: key.slice(i + 2),
             text: note.text,
             updatedAt: note.updatedAt,
+            severity: note.severity ?? ('suggest' as NoteSeverity),
+            status: note.status ?? ('open' as NoteStatus),
           };
     })
     .filter((n): n is NonNullable<typeof n> => !!n);
   const visibleNotes = noteEntries.filter((n) => !hiddenLower.has(n.table.toLowerCase()));
   lines.push('## 字段评审意见');
   lines.push('');
-  if (visibleNotes.length === 0) lines.push('（无）');
-  for (const table of schema.tables) {
-    const notes = visibleNotes.filter((n) => n.table === table.name);
-    if (notes.length === 0) continue;
-    lines.push(`### ${table.name}`);
+  if (visibleNotes.length === 0) {
+    lines.push('（无）');
     lines.push('');
-    for (const n of notes) {
-      const at = n.updatedAt ? formatIso(n.updatedAt) : '';
-      lines.push(`- \`${n.table}.${n.column}\`${at ? `（${at}）` : ''}`);
-      for (const l of n.text.split('\n')) lines.push(`  > ${l}`);
+  } else {
+    const countBy = (pred: (n: (typeof visibleNotes)[number]) => boolean) =>
+      visibleNotes.filter(pred).length;
+    lines.push(
+      `共 ${visibleNotes.length} 条：` +
+        (['block', 'warn', 'suggest'] as const)
+          .map((s) => `${severityLabel(s)} ${countBy((n) => n.severity === s)}`)
+          .join(' · ') +
+        '；' +
+        (['open', 'accepted', 'rejected'] as const)
+          .map((s) => `${statusLabel(s)} ${countBy((n) => n.status === s)}`)
+          .join(' · '),
+    );
+    lines.push('');
+    const tableOrder = new Map(schema.tables.map((t, i) => [t.name, i]));
+    for (const sev of ['block', 'warn', 'suggest'] as const) {
+      const group = visibleNotes
+        .filter((n) => n.severity === sev)
+        .sort(
+          (a, b) =>
+            (tableOrder.get(a.table) ?? 999) - (tableOrder.get(b.table) ?? 999) ||
+            a.column.localeCompare(b.column),
+        );
+      if (group.length === 0) continue;
+      lines.push(`### ${severityLabel(sev)}（${group.length}）`);
+      lines.push('');
+      for (const n of group) {
+        const at = n.updatedAt ? formatIso(n.updatedAt) : '';
+        lines.push(
+          `- **[${statusLabel(n.status)}]** \`${n.table}.${n.column}\`${at ? `（${at}）` : ''}`,
+        );
+        for (const l of n.text.split('\n')) lines.push(`  > ${l}`);
+      }
+      lines.push('');
     }
-    lines.push('');
   }
-  if (visibleNotes.length === 0) lines.push('');
 
   if (deletedTableNames.length > 0) {
     lines.push('## 已排除（回收站）');
     lines.push('');
-    lines.push(
-      `以下 ${deletedTableNames.length} 张表已从视图中隐藏，其关联边未纳入上述统计：`,
-    );
+    lines.push(`以下 ${deletedTableNames.length} 张表已从视图中隐藏，其关联边未纳入上述统计：`);
     for (const name of deletedTableNames) lines.push(`- \`${name}\``);
     lines.push('');
   }

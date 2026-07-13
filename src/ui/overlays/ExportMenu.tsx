@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useApp, effectiveForeignKeys, visibleSchema } from '../../store';
+import { useApp, effectiveForeignKeys, visibleSchema, getPersistedSnapshot } from '../../store';
+import { buildWorkspaceArchive, ARCHIVE_EXTENSION } from '../../exports/archive';
+import { version as appVersion } from '../../../package.json';
 import type { Core } from 'cytoscape';
 import { getCy } from '../../diagram/cyHandle';
 import { appendInferredToScript } from '../../exports/toDdl';
@@ -28,6 +30,11 @@ function resolveExportTheme(pref: ThemePreference): ExportTheme {
 export function ExportMenu() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<null | 'png' | 'svg'>(null);
+  // 评审报告 options sub-panel: whether to include the engine's candidate
+  // lists (a reviewer may want a "facts + opinions only" report).
+  const [reportOptsOpen, setReportOptsOpen] = useState(false);
+  const [incFkCandidates, setIncFkCandidates] = useState(true);
+  const [incLogicalCandidates, setIncLogicalCandidates] = useState(true);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const rawSchema = useApp((s) => s.schema);
   const modules = useApp((s) => s.modules);
@@ -52,7 +59,15 @@ export function ExportMenu() {
   const effectiveFks = useMemo(
     () =>
       schema
-        ? effectiveForeignKeys(schema, inferred, decisions, showLow, deletedTables, manualFks, display)
+        ? effectiveForeignKeys(
+            schema,
+            inferred,
+            decisions,
+            showLow,
+            deletedTables,
+            manualFks,
+            display,
+          )
         : [],
     [schema, inferred, decisions, showLow, deletedTables, manualFks, display],
   );
@@ -155,12 +170,17 @@ export function ExportMenu() {
       manualFks,
       deletedTableNames,
       fieldNotes,
+      include: {
+        inferredFkCandidates: incFkCandidates,
+        logicalCandidates: incLogicalCandidates,
+      },
     });
     download(
       'data:text/markdown;charset=utf-8,' + encodeURIComponent(md),
       `er-review-report-${ts()}.md`,
     );
     setOpen(false);
+    setReportOptsOpen(false);
   };
 
   const exportSpecDoc = () => {
@@ -171,9 +191,26 @@ export function ExportMenu() {
       (f) => f.source !== 'inferred' || decisions[fkKey(f)] === 'accept',
     );
     const md = buildSpecDoc({ schema, relations: confirmed });
+    download('data:text/markdown;charset=utf-8,' + encodeURIComponent(md), `db-spec-${ts()}.md`);
+    setOpen(false);
+  };
+
+  const exportArchive = () => {
+    if (!rawSchema) return;
+    // The archive is a WORKSPACE snapshot, not a view export: it includes the
+    // full persisted state (recycle-binned tables, rejected candidates, layout,
+    // camera), so opening it elsewhere reproduces this session exactly.
+    const json = buildWorkspaceArchive(
+      getPersistedSnapshot() as unknown as Record<string, unknown>,
+      {
+        appVersion,
+        exportedAt: new Date().toISOString(),
+        tableCount: rawSchema.tables.length,
+      },
+    );
     download(
-      'data:text/markdown;charset=utf-8,' + encodeURIComponent(md),
-      `db-spec-${ts()}.md`,
+      'data:application/json;charset=utf-8,' + encodeURIComponent(json),
+      `er-workspace-${ts()}${ARCHIVE_EXTENSION}`,
     );
     setOpen(false);
   };
@@ -187,7 +224,9 @@ export function ExportMenu() {
         className={
           'inline-flex items-center gap-1.5 h-8 pl-2 pr-2.5 rounded-md text-xs font-medium ' +
           'bg-ink-800 text-white hover:bg-ink-900 ' +
-          'dark:bg-inkd-700 dark:text-inkd-50 dark:hover:bg-inkd-800 dark:hover:text-white ' +
+          // Dark mode is a LIGHT button (inkd-700/800 are light steps), so the
+          // text must stay dark in every state — hover:text-white was a bug.
+          'dark:bg-inkd-700 dark:text-inkd-50 dark:hover:bg-inkd-800 ' +
           'disabled:bg-ink-100 disabled:text-ink-400 dark:disabled:bg-inkd-200 dark:disabled:text-inkd-500 ' +
           'disabled:cursor-not-allowed transition-colors'
         }
@@ -226,14 +265,47 @@ export function ExportMenu() {
           <MenuItem
             icon={<ReportIcon />}
             label="评审报告"
-            hint=".md"
-            onClick={exportReport}
+            hint={reportOptsOpen ? '选项 ▴' : '.md ▾'}
+            onClick={() => setReportOptsOpen((v) => !v)}
           />
+          {reportOptsOpen && (
+            <div className="mx-2 mb-1 rounded-md border border-ink-100 bg-ink-50/50 px-2 py-1.5 text-[11px] dark:border-inkd-300 dark:bg-inkd-200/50">
+              <label className="flex cursor-pointer items-center gap-1.5 py-0.5 text-ink-600 dark:text-inkd-700">
+                <input
+                  type="checkbox"
+                  className="accent-ink-700 dark:accent-inkd-700"
+                  checked={incFkCandidates}
+                  onChange={() => setIncFkCandidates((v) => !v)}
+                />
+                包含推断外键候选
+              </label>
+              <label className="flex cursor-pointer items-center gap-1.5 py-0.5 text-ink-600 dark:text-inkd-700">
+                <input
+                  type="checkbox"
+                  className="accent-ink-700 dark:accent-inkd-700"
+                  checked={incLogicalCandidates}
+                  onChange={() => setIncLogicalCandidates((v) => !v)}
+                />
+                包含逻辑关联候选（手动连线始终包含）
+              </label>
+              <div className="mt-1 flex justify-end">
+                <button
+                  type="button"
+                  className="h-6 rounded bg-ink-800 px-2.5 text-[11px] font-medium text-white hover:bg-ink-900 dark:bg-inkd-700 dark:text-inkd-50 dark:hover:bg-inkd-800"
+                  onClick={exportReport}
+                >
+                  导出报告
+                </button>
+              </div>
+            </div>
+          )}
+          <MenuItem icon={<SpecIcon />} label="数据库说明文档" hint=".md" onClick={exportSpecDoc} />
+          <div className="my-1 border-t border-ink-100 dark:border-inkd-300" />
           <MenuItem
-            icon={<SpecIcon />}
-            label="数据库说明文档"
-            hint=".md"
-            onClick={exportSpecDoc}
+            icon={<ArchiveIcon />}
+            label="工作区存档"
+            hint=".erreview"
+            onClick={exportArchive}
           />
         </div>
       )}
@@ -346,7 +418,12 @@ function ReportIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <rect x="3" y="2" width="10" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path
+        d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -356,6 +433,20 @@ function SpecIcon() {
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <rect x="2.5" y="3" width="11" height="10" rx="1" stroke="currentColor" strokeWidth="1.4" />
       <path d="M2.5 6h11M6.5 6v7M2.5 9.5h11" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+function ArchiveIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2" y="3" width="12" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M3.2 6.5v5A1.5 1.5 0 0 0 4.7 13h6.6a1.5 1.5 0 0 0 1.5-1.5v-5M6.5 9h3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import type { Column, Table } from '../../parser/types';
+import type { NoteSeverity } from '../../store/types';
 import { columnRoleBadge, FIELD_ROW_HEIGHT, shortType } from '../buildGraph';
 import { highlightMatch } from './highlight';
 
@@ -16,8 +17,9 @@ interface ColumnRowProps {
    *  curve leaves the card horizontally on that side. Absent (pan mode) hides
    *  the dots. */
   onConnectStart?: (side: 'left' | 'right', e: React.MouseEvent) => void;
-  /** This field has a review note (评审批注) — show the amber marker. */
-  hasNote?: boolean;
+  /** This field has a review note (评审批注) — show the marker dot, colored by
+   *  级别: 建议 amber / 警告 orange / 阻塞 rose. Null = no note. */
+  noteSeverity?: NoteSeverity | null;
   /** Click on the row: open the review-note bubble for this field. Also
    *  enables the hover highlight that signals the row is clickable. */
   onOpenNote?: (e: React.MouseEvent) => void;
@@ -41,9 +43,10 @@ export function ColumnRow({
   isFk,
   query = '',
   onConnectStart,
-  hasNote = false,
+  noteSeverity = null,
   onOpenNote,
 }: ColumnRowProps) {
+  const hasNote = noteSeverity !== null;
   const roleBadge = columnRoleBadge(col, table, showIndex);
   const isPk = roleBadge === 'PK';
   const typeText = showType ? shortType(col.rawType) : '';
@@ -99,7 +102,12 @@ export function ColumnRow({
           {highlightMatch(col.name, query)}
           {hasNote && (
             <span
-              className="ml-1 inline-block h-[6px] w-[6px] rounded-full bg-amber-500 align-middle"
+              className={clsx(
+                'ml-1 inline-block h-[6px] w-[6px] rounded-full align-middle',
+                noteSeverity === 'block' && 'bg-rose-500',
+                noteSeverity === 'warn' && 'bg-orange-500',
+                noteSeverity === 'suggest' && 'bg-amber-500',
+              )}
               aria-label="有评审批注"
             />
           )}
@@ -114,24 +122,24 @@ export function ColumnRow({
         )}
       </div>
       {/* Connect dots (触点): appear on row hover at BOTH edges of the name
-          row — the user drags from whichever side faces the target table, so
-          left→right and right→left connects both feel natural. Dragging one
-          onto another table's field row creates a manual FK. z-10 keeps them
-          above the card's resize strip; mousedown must not bubble (the
-          marquee/pan handlers live on the canvas underneath). */}
+          row — the user drags from whichever side faces the target table.
+          The BUTTON is a 22px invisible hit zone (a magnetic snap radius:
+          getting close is enough), the inner span is the 14px visual dot with
+          the breathing halo; hovering locks the halo bright and grows the dot
+          (see styles.css). The cursor is a custom "draw a line from here"
+          glyph. z-10 keeps them above the card's resize strip; mousedown must
+          not bubble (marquee/pan handlers live underneath). */}
       {onConnectStart &&
         (['left', 'right'] as const).map((side) => (
           <button
             key={side}
             type="button"
             className={clsx(
-              'connect-dot absolute z-10 flex h-[14px] w-[14px] items-center justify-center rounded-full',
-              'border border-sky-500 bg-white dark:bg-inkd-100',
+              'connect-dot-hit absolute z-10 flex h-[22px] w-[22px] items-center justify-center',
               'opacity-0 transition-opacity group-hover/row:opacity-100',
-              'hover:bg-sky-100 dark:hover:bg-sky-900/40 cursor-crosshair',
             )}
-            style={{ [side]: 3, top: FIELD_ROW_HEIGHT / 2 - 7 }}
-            title="拖到目标表的字段上，手动建立外键"
+            style={{ [side]: -1, top: FIELD_ROW_HEIGHT / 2 - 11 }}
+            title="从这里拉一条线到目标字段，建立外键 / 逻辑关联"
             aria-label={`从 ${table.name}.${col.name} 拖线建立外键（${side === 'left' ? '左' : '右'}）`}
             onMouseDown={(e) => {
               e.preventDefault();
@@ -139,7 +147,15 @@ export function ColumnRow({
               onConnectStart(side, e);
             }}
           >
-            <span className="h-[6px] w-[6px] rounded-full bg-sky-500" aria-hidden />
+            <span
+              className={clsx(
+                'connect-dot flex h-[14px] w-[14px] items-center justify-center rounded-full',
+                'border border-sky-500 bg-white dark:bg-inkd-100',
+              )}
+              aria-hidden
+            >
+              <span className="h-[6px] w-[6px] rounded-full bg-sky-500" />
+            </span>
           </button>
         ))}
       {showComment && col.comment && (

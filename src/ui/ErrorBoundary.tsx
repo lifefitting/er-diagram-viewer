@@ -34,7 +34,7 @@ export class ErrorBoundary extends Component<Props, State> {
         </div>
         <button
           type="button"
-          className="mt-1 px-3 py-1.5 text-sm rounded-md bg-ink-800 dark:bg-inkd-700 text-white hover:bg-ink-900 dark:hover:bg-inkd-800 transition-colors"
+          className="mt-1 px-3 py-1.5 text-sm rounded-md bg-ink-800 dark:bg-inkd-700 text-white dark:text-inkd-50 hover:bg-ink-900 dark:hover:bg-inkd-800 transition-colors"
           onClick={() => window.location.reload()}
         >
           刷新页面

@@ -6,19 +6,19 @@
     <meta name="theme-color" content="#6366f1" />
     <meta name="color-scheme" content="light dark" />
 
-    <title>ER Diagram Viewer — 粘贴 SQL DDL，秒级生成可交互的 ER 图</title>
+    <title>ER Diagram Viewer — 把 SQL DDL 变成可评审的 ER 图</title>
     <meta
       name="description"
-      content="纯前端运行的智能 ER 图查看器。粘贴 SQL DDL 自动生成数据库关系图，支持外键智能推断、分片表合并、模块自动着色。零后端，离线可用，可双击 HTML 文件运行。"
+      content="纯前端的数据库设计评审工作台。粘贴 SQL DDL 秒级生成 ER 图，推断外键、扫描业务键逻辑关联、字段拖线补关系、逐字段写评审批注，一键导出评审报告与数据库设计说明文档。零后端，离线可用，可双击 HTML 文件运行。"
     />
-    <meta name="keywords" content="ER图,ER Diagram,SQL DDL,数据库关系图,外键推断,Schema 可视化,MySQL,PostgreSQL" />
+    <meta name="keywords" content="ER图,ER Diagram,SQL DDL,数据库关系图,外键推断,数据库评审,Schema Review,评审报告,数据库设计说明文档,MySQL,PostgreSQL" />
     <meta name="author" content="ER Diagram Viewer" />
 
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="ER Diagram Viewer — 粘贴 SQL DDL，秒级生成可交互的 ER 图" />
+    <meta property="og:title" content="ER Diagram Viewer — 把 SQL DDL 变成可评审的 ER 图" />
     <meta
       property="og:description"
-      content="纯前端、离线可用、单文件分发的智能 ER 图工具。即使 DDL 里没有 FOREIGN KEY 也能按命名 + 类型 + 索引启发式推断外键。"
+      content="纯前端、离线可用、单文件分发的数据库评审工作台：推断外键 + 业务键逻辑关联 + 字段批注 + 评审文档导出。看清关系，评完带走。"
     />
     <meta name="twitter:card" content="summary_large_image" />
 
@@ -347,6 +347,53 @@
       .code .p { color: #f472b6; }
 
       /* ===== Comparison ===== */
+      /* ============== VERSION TIMELINE ============== */
+      .timeline-wrap {
+        overflow-x: auto;
+        padding: 8px 4px 16px;
+      }
+      .timeline {
+        display: flex;
+        gap: 0;
+        min-width: 720px;
+      }
+      .tl-item {
+        flex: 1 1 0;
+        min-width: 170px;
+        position: relative;
+        padding: 26px 14px 0 14px;
+      }
+      .tl-item::before {
+        content: "";
+        position: absolute;
+        top: 7px;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: var(--border);
+      }
+      .tl-item:first-child::before { left: 14px; }
+      .tl-item:last-child::before { right: auto; width: 14px; }
+      .tl-item::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 14px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--bg);
+        border: 3px solid var(--accent);
+      }
+      .tl-item.current::after { background: var(--accent); }
+      .tl-ver {
+        font: 700 14px ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--accent);
+      }
+      .tl-date { font-size: 12px; color: var(--text-muted); margin-left: 6px; }
+      .tl-item h4 { margin: 6px 0 6px; font-size: 14.5px; }
+      .tl-item p { font-size: 12.5px; line-height: 1.55; color: var(--text-muted); margin: 0; }
+
       .comparison-wrap {
         overflow-x: auto;
         border: 1px solid var(--border);
@@ -442,6 +489,7 @@
         <div class="nav-links">
           <a href="#features">特性</a>
           <a href="#quickstart">快速开始</a>
+          <a href="#versions">版本</a>
           <a href="#compare">对比</a>
           <a href="https://github.com/lifefitting/er-diagram-viewer" target="_blank" rel="noopener">GitHub</a>
         </div>
@@ -455,14 +503,14 @@
           <span class="badge">v0.3.1 · 评审套件：手动连线 / 逻辑关联 / 字段批注</span>
           <h1>
             把 SQL DDL 变成<br />
-            <span class="accent">可交互的 ER 图</span>
+            <span class="accent">可评审的 ER 图</span>
           </h1>
           <p class="lead">
-            粘贴 <code>CREATE TABLE</code> 脚本到浏览器，秒级生成数据库关系图。
-            即使脚本没有 <code>FOREIGN KEY</code>，也能按命名、类型、索引启发式推断外键，并允许人工确认；
-            推断不到的关系可以在字段间直接拖线补上，分库分表的业务键关联也能扫描出来。
-            边看边评：点字段写批注，最后一键导出评审报告与数据库设计说明文档。
-            零后端，完全本地，导入的 SQL 不出你的浏览器。
+            粘贴 <code>CREATE TABLE</code> 脚本，秒级生成数据库关系图——这是起点，不是终点。
+            没写 <code>FOREIGN KEY</code>？按命名、类型、索引推断出来给你逐条确认；推断不到的，字段间直接拖线补上；
+            分库分表靠 <code>out_trade_no</code> 这类业务键关联？扫描出来画成逻辑关联线。
+            然后进入正题：逐字段写评审批注、确认每一条关系，一键导出<strong>评审报告</strong>与<strong>数据库设计说明文档</strong>。
+            看清关系，评完带走。零后端，完全本地，导入的 SQL 不出你的浏览器。
           </p>
           <div class="cta-group">
             <!-- TODO: 部署 SPA 到 /app/ 后此链接可用；当前先指向 GitHub Release -->
@@ -591,9 +639,9 @@
         <div class="container">
           <div class="section-head">
             <div class="section-eyebrow">核心特性</div>
-            <h2>专攻"读懂存量 Schema"这件事</h2>
+            <h2>读懂存量 Schema，然后把评审做完</h2>
             <p class="section-lead">
-              不是又一个 ER 设计工具。它的位置是 review、onboarding、迁移前评估——把已经存在的库讲清楚。
+              不是又一个 ER 设计工具。它覆盖的是完整评审闭环：读懂关系 → 补全关系 → 写下意见 → 导出文档。
             </p>
           </div>
           <div class="features">
@@ -687,13 +735,49 @@ bun run build:single <span class="c"># → ./dist-single/er-diagram-viewer.html<
       </section>
 
       <!-- ============== COMPARISON ============== -->
+      <!-- ============== VERSION TIMELINE ============== -->
+      <section id="versions">
+        <div class="container">
+          <div class="section-head">
+            <div class="section-eyebrow">版本轨迹</div>
+            <h2>从"画出来"到"评得动"</h2>
+            <p class="section-lead">每个版本解决一层问题：先看清，再好用，最后把评审做完。</p>
+          </div>
+          <div class="timeline-wrap">
+            <div class="timeline">
+              <div class="tl-item">
+                <span class="tl-ver">v0.1.0</span><span class="tl-date">2026-05</span>
+                <h4>看清关系</h4>
+                <p>SQL DDL 秒级解析成 ER 图；没写 FOREIGN KEY 也能按命名 + 类型 + 索引推断外键，逐条确认。</p>
+              </div>
+              <div class="tl-item">
+                <span class="tl-ver">v0.2.x</span><span class="tl-date">2026-06</span>
+                <h4>把图排成评审要的样子</h4>
+                <p>可编辑画布：多选拖动、正交避障布线、连线微调、回收站、搜索跳转，布局与视口跨刷新保存。</p>
+              </div>
+              <div class="tl-item">
+                <span class="tl-ver">v0.3.0</span><span class="tl-date">2026-07</span>
+                <h4>连线不再打架</h4>
+                <p>平行连线自动分道、布线质量度量护栏；稀疏 schema 导入不再空白画布。</p>
+              </div>
+              <div class="tl-item current">
+                <span class="tl-ver">v0.3.1</span><span class="tl-date">2026-07</span>
+                <h4>评审闭环</h4>
+                <p>字段拖线补关系、业务键逻辑关联扫描、逐字段评审批注（带时间戳），导出评审报告与数据库设计说明文档。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="compare">
         <div class="container">
           <div class="section-head">
             <div class="section-eyebrow">差异化定位</div>
             <h2>与同类工具的位置</h2>
             <p class="section-lead">
-              它不与 dbdiagram.io / drawSQL 这类"协作型 ER 设计工具"竞争，专攻评审 / 读懂存量 schema 的场景。
+              它不与 dbdiagram.io / drawSQL 这类"协作型 ER 设计工具"竞争——它们帮你画新库，
+              这里帮你<strong>评审存量库</strong>：读懂、补全、批注、出文档，一条龙在浏览器里完成。
             </p>
           </div>
           <div class="comparison-wrap">
@@ -737,6 +821,41 @@ bun run build:single <span class="c"># → ./dist-single/er-diagram-viewer.html<
                   <td class="no">—</td>
                 </tr>
                 <tr>
+                  <td>业务键逻辑关联<br /><small>（分库分表无物理 FK）</small></td>
+                  <td class="highlight"><span class="ok">✓ 扫描 + 手动</span></td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>字段拖线补关系</td>
+                  <td class="highlight"><span class="ok">✓ 连完即所得</span></td>
+                  <td>改 DSL 源码</td>
+                  <td>拖拽建模</td>
+                  <td class="no">改库</td>
+                </tr>
+                <tr>
+                  <td>字段评审批注</td>
+                  <td class="highlight"><span class="ok">✓ 带时间戳</span></td>
+                  <td class="no">—</td>
+                  <td>评论（付费）</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>评审报告导出</td>
+                  <td class="highlight"><span class="ok">✓ Markdown</span></td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>数据库设计说明文档</td>
+                  <td class="highlight"><span class="ok">✓ 标准格式</span></td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td>部分支持</td>
+                </tr>
+                <tr>
                   <td>离线 / 隐私</td>
                   <td class="highlight"><span class="ok">完全本地</span></td>
                   <td class="no">SaaS</td>
@@ -759,8 +878,8 @@ bun run build:single <span class="c"># → ./dist-single/er-diagram-viewer.html<
       <!-- ============== CTA BAND ============== -->
       <section class="cta-band">
         <div class="container">
-          <h2>把你的下一个数据库评审会，变成 5 秒</h2>
-          <p>粘贴 DDL → 浏览 ER 图 → 接受推断 → 导出补全脚本。</p>
+          <h2>下一场数据库评审，从贴一段 DDL 开始</h2>
+          <p>粘贴 DDL → 看清关系 → 补线写批注 → 导出评审报告与说明文档。</p>
           <div class="cta-group">
             <a class="btn btn-primary" href="./app/">立即试用</a>
             <a class="btn btn-secondary" href="https://github.com/lifefitting/er-diagram-viewer" target="_blank" rel="noopener">查看源码</a>

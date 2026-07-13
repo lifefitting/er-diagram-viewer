@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseSql } from '../parser';
 import { inferForeignKeys } from './inferForeignKeys';
-import { inferModules } from './inferModules';
+import { inferModules, MODULE_PALETTES } from './inferModules';
 
 function moduleFor(sql: string, tableName: string): string | undefined {
   const schema = parseSql(sql);
@@ -74,9 +74,22 @@ describe('inferModules', () => {
     const fks = [...schema.explicitForeignKeys, ...inferForeignKeys(schema)];
     const result = inferModules(schema, fks);
     expect(result.ordered[0].name).toBe('order'); // size 2 → first palette slot
-    expect(result.ordered[0].color.header).toBe('#2563eb');
+    expect(result.ordered[0].color.header).toBe('#0c5788'); // professional/denim
     expect(result.ordered[1].name).toBe('user'); // singleton, second slot
-    expect(result.ordered[1].color.header).toBe('#ea580c');
+    expect(result.ordered[1].color.header).toBe('#5b7328'); // professional/olive
+  });
+
+  it('professional palette ships an explicit dark-canvas step on every slot', () => {
+    // headerDark is the hand-stepped dark-mode edge color; without it the edge
+    // falls back to the automatic HSL lift, which the professional palette
+    // must never do (its saturated darks would lift to neon).
+    for (const slot of MODULE_PALETTES.professional) {
+      expect(slot.headerDark).toMatch(/^#[0-9a-f]{6}$/);
+      expect(slot.text).toBe('#ffffff');
+    }
+    // 12 distinct headers and 12 distinct dark steps — no accidental slot dupes.
+    expect(new Set(MODULE_PALETTES.professional.map((s) => s.header)).size).toBe(12);
+    expect(new Set(MODULE_PALETTES.professional.map((s) => s.headerDark)).size).toBe(12);
   });
 
   it('returns palette-specific colors when a non-default palette is requested', () => {

@@ -240,7 +240,7 @@ function HelpPopover() {
     >
       <div className="mb-2 text-[12px] font-semibold text-ink-800 dark:text-inkd-800">画布操作</div>
       <ul className="space-y-1.5">
-        <HelpRow keys="拖拽空白">框选多张表（选择模式）</HelpRow>
+        <HelpRow keys="拖拽空白">框选表；框内无表时框选手动连线（选择模式）</HelpRow>
         <HelpRow keys="抓手 / 空格 / 中键">拖拽平移画布</HelpRow>
         <HelpRow keys="拖拽表头">移动卡片（多选时整组移动）</HelpRow>
         <HelpRow keys="⇧ / ⌘ 点击">加选 / 取消单张</HelpRow>

@@ -20,7 +20,17 @@ import type { AppState } from './types';
 
 type Persisted = Partial<AppState>;
 
-const PALETTES = new Set(['vibrant', 'pastel', 'earth', 'mono']);
+/** Bump when the persisted shape changes in a breaking way; older snapshots
+ *  are dropped on load instead of producing runtime errors.
+ *  v2: `decisions` keys switched to canonical (case-insensitive) form via
+ *      `canonicalFkKey`. Previous v1 decisions were case-preserving and
+ *      would silently fail to apply after the change.
+ *  Lives here (not store/index.ts) so pure consumers — the persist config AND
+ *  the workspace-archive format — share one source of truth without pulling in
+ *  the zustand store instance. */
+export const PERSIST_VERSION = 2;
+
+const PALETTES = new Set(['professional', 'vibrant', 'pastel', 'earth', 'mono']);
 const THEMES = new Set(['light', 'dark', 'system']);
 
 function isFiniteNum(v: unknown): v is number {
@@ -28,7 +38,12 @@ function isFiniteNum(v: unknown): v is number {
 }
 
 function isPt(v: unknown): boolean {
-  return typeof v === 'object' && v !== null && isFiniteNum((v as { x: unknown }).x) && isFiniteNum((v as { y: unknown }).y);
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    isFiniteNum((v as { x: unknown }).x) &&
+    isFiniteNum((v as { y: unknown }).y)
+  );
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -62,7 +77,10 @@ function isManualFk(v: unknown): boolean {
 /** {x,y,zoom} with finite numbers. */
 function isViewport(o: unknown): boolean {
   return (
-    isRecord(o) && isFiniteNum(o.x) && isFiniteNum(o.y) && isFiniteNum((o as { zoom: unknown }).zoom)
+    isRecord(o) &&
+    isFiniteNum(o.x) &&
+    isFiniteNum(o.y) &&
+    isFiniteNum((o as { zoom: unknown }).zoom)
   );
 }
 
@@ -80,7 +98,10 @@ export function sanitizePersisted(raw: unknown): Persisted {
   if (THEMES.has(raw.theme as string)) out.theme = raw.theme;
   if (typeof raw.sidebarCollapsed === 'boolean') out.sidebarCollapsed = raw.sidebarCollapsed;
 
-  if (isRecord(raw.decisions) && Object.values(raw.decisions).every((v) => v === 'accept' || v === 'reject'))
+  if (
+    isRecord(raw.decisions) &&
+    Object.values(raw.decisions).every((v) => v === 'accept' || v === 'reject')
+  )
     out.decisions = raw.decisions;
   if (Array.isArray(raw.manualFks) && raw.manualFks.every(isManualFk))
     out.manualFks = raw.manualFks;
@@ -90,20 +111,33 @@ export function sanitizePersisted(raw: unknown): Persisted {
   )
     out.logicalKeys = raw.logicalKeys;
   if (isRecord(raw.fieldNotes)) {
-    // Notes carry a timestamp since they gained one; legacy plain-string
-    // values (pre-timestamp snapshots) are upgraded with an empty updatedAt.
-    const notes: Record<string, { text: string; updatedAt: string }> = {};
+    // Two generations of legacy shapes upgrade in place: plain-string values
+    // (pre-timestamp) and {text, updatedAt} objects (pre-severity/status) —
+    // both land on the defaults 建议 (suggest) / 待处理 (open).
+    const SEVERITIES = new Set(['suggest', 'warn', 'block']);
+    const STATUSES = new Set(['open', 'accepted', 'rejected']);
+    const notes: Record<
+      string,
+      { text: string; updatedAt: string; severity: string; status: string }
+    > = {};
     let valid = true;
     for (const [k, v] of Object.entries(raw.fieldNotes)) {
       if (typeof v === 'string' && v.length > 0) {
-        notes[k] = { text: v, updatedAt: '' };
+        notes[k] = { text: v, updatedAt: '', severity: 'suggest', status: 'open' };
       } else if (
         isRecord(v) &&
         typeof v.text === 'string' &&
         v.text.length > 0 &&
-        (v.updatedAt === undefined || typeof v.updatedAt === 'string')
+        (v.updatedAt === undefined || typeof v.updatedAt === 'string') &&
+        (v.severity === undefined || SEVERITIES.has(v.severity as string)) &&
+        (v.status === undefined || STATUSES.has(v.status as string))
       ) {
-        notes[k] = { text: v.text, updatedAt: (v.updatedAt as string) ?? '' };
+        notes[k] = {
+          text: v.text,
+          updatedAt: (v.updatedAt as string) ?? '',
+          severity: (v.severity as string) ?? 'suggest',
+          status: (v.status as string) ?? 'open',
+        };
       } else {
         valid = false;
         break;

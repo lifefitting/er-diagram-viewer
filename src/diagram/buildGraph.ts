@@ -358,7 +358,8 @@ export function buildElements(
     // diagram from the FK column outward, the line should match the card it
     // leaves rather than the card it lands on. This also keeps all FKs that
     // originate from the same table visually consistent.
-    const color = colorForTableModule(fk.fromTable, modules.byTable, modules.modules).header;
+    const moduleColor = colorForTableModule(fk.fromTable, modules.byTable, modules.modules);
+    const color = moduleColor.header;
 
     const srcTable = tableByName.get(fk.fromTable);
     const tgtTable = tableByName.get(fk.toTable);
@@ -393,10 +394,12 @@ export function buildElements(
         // started the drag from, defaulting to the right.
         loopSide: fk.fromTable === fk.toTable ? (fk.drawSide ?? 'right') : '',
         color,
-        // Dark-canvas-safe variant of `color`: dark palette hues (mono, earth,
-        // darker vibrant) are lifted to a visible lightness. The canvas swaps
-        // to this in dark mode; light-mode + light exports keep `color`.
-        colorDark: darkEdgeColor(color),
+        // Dark-canvas-safe variant of `color`. Palettes designed for both
+        // modes ship an explicit hand-stepped `headerDark`; the rest fall back
+        // to the automatic lightness lift (mono, earth, darker vibrant). The
+        // canvas swaps to this in dark mode; light-mode + light exports keep
+        // `color`.
+        colorDark: moduleColor.headerDark ?? darkEdgeColor(color),
         crossModule: sameModule ? 'no' : 'yes',
         srcRowIdx,
         tgtRowIdx,

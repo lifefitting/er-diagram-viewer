@@ -11,6 +11,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
   modules: EMPTY_MODULES,
   palette: DEFAULT_PALETTE,
   logicalKeys: [],
+  workspaceEpoch: 0,
   setSql(sql) {
     const { schema, inferred, modules } = runPipeline(sql, get().palette);
     set({
@@ -54,5 +55,40 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
     // candidates correctly. Decisions keyed on surviving candidates persist.
     const { schema, inferred, modules } = runPipeline(sql, get().palette, keys);
     set({ logicalKeys: keys, schema, inferred, modules });
+  },
+  importWorkspace(archived) {
+    // Replace-the-workspace semantics: every workspace field falls back to the
+    // fresh-import default (the same reset list as `setSql`) so nothing from
+    // the CURRENT session leaks into the imported one — then the archive's
+    // validated fields overlay on top. Personal preferences (theme,
+    // sidebarCollapsed) are deliberately NOT restored from the archive: a
+    // colleague's dark-mode choice is not part of the review record.
+    const { theme: _theme, sidebarCollapsed: _sidebar, ...rest } = archived;
+    const palette = rest.palette ?? get().palette;
+    const logicalKeys = rest.logicalKeys ?? [];
+    const { schema, inferred, modules } = runPipeline(rest.rawSql, palette, logicalKeys);
+    set({
+      // fresh-workspace baseline (mirrors setSql's reset list)
+      decisions: {},
+      manualFks: [],
+      fieldNotes: {},
+      collapsed: {},
+      tableWidths: {},
+      nodePositions: {},
+      manualRoutes: {},
+      deletedTables: {},
+      viewport: null,
+      flashTables: [],
+      // archive payload wins over the baseline where present
+      ...rest,
+      palette,
+      logicalKeys,
+      schema,
+      inferred,
+      modules,
+      // Remount the canvas: replays the refresh-restore path (positions +
+      // one-shot camera) against the just-imported layout.
+      workspaceEpoch: get().workspaceEpoch + 1,
+    });
   },
 });

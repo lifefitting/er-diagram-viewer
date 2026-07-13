@@ -74,7 +74,7 @@ describe('buildReviewReport', () => {
     expect(md).toContain('[手动添加] `orders.batch_no` ~ `payments.batch_no`');
   });
 
-  it('renders field review notes grouped by table, excluding hidden tables', () => {
+  it('renders field review notes grouped by 级别 with 状态 inline, excluding hidden tables', () => {
     const md = buildReviewReport({
       schema,
       inferred: [],
@@ -85,17 +85,45 @@ describe('buildReviewReport', () => {
         'orders::out_trade_no': {
           text: '命名建议改为 external_trade_no\n且应加唯一索引',
           updatedAt: new Date(2026, 6, 11, 9, 5).toISOString(),
+          severity: 'block',
+          status: 'accepted',
         },
-        'users::id': { text: '隐藏表上的批注不应出现', updatedAt: '' },
+        // Legacy note without severity/status → defaults 建议/待处理.
+        'orders::id': { text: '主键类型建议 BIGINT', updatedAt: '' },
+        'users::id': { text: '隐藏表上的批注不应出现', updatedAt: '', severity: 'block' },
       },
       generatedAt: AT,
     });
     expect(md).toContain('## 字段评审意见');
-    expect(md).toContain('### orders');
-    expect(md).toContain('- `orders.out_trade_no`（2026-07-11 09:05）');
+    // summary counts exclude the hidden-table note
+    expect(md).toContain('共 2 条：阻塞 1 · 警告 0 · 建议 1；待处理 1 · 已采纳 1 · 不采纳 0');
+    // severity groups in escalation order, status inline
+    expect(md).toContain('### 阻塞（1）');
+    expect(md).toContain('- **[已采纳]** `orders.out_trade_no`（2026-07-11 09:05）');
     expect(md).toContain('  > 命名建议改为 external_trade_no');
     expect(md).toContain('  > 且应加唯一索引');
+    expect(md).toContain('### 建议（1）');
+    expect(md).toContain('- **[待处理]** `orders.id`');
+    expect(md.indexOf('### 阻塞')).toBeLessThan(md.indexOf('### 建议'));
+    expect(md).not.toContain('### 警告');
     expect(md).not.toContain('隐藏表上的批注');
+  });
+
+  it('omits candidate sections per export options (manual logical always kept)', () => {
+    const md = buildReviewReport({
+      schema,
+      inferred: [fkCandidate, logicalCandidate],
+      decisions: {},
+      manualFks: [manualLogical],
+      deletedTableNames: [],
+      include: { inferredFkCandidates: false, logicalCandidates: false },
+      generatedAt: AT,
+    });
+    expect(md).not.toContain('## 推断外键候选');
+    expect(md).not.toContain('payments.order_id'); // fk candidate gone
+    expect(md).not.toContain('out_trade_no'); // logical candidate gone
+    expect(md).toContain('[手动添加] `orders.batch_no` ~ `payments.batch_no`'); // user's own assertion stays
+    expect(md).toContain('本报告按导出选项省略：推断外键候选、逻辑关联候选');
   });
 
   it('marks rejected candidates and excludes edges touching recycle-binned tables', () => {
