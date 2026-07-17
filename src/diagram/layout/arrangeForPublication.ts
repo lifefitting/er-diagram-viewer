@@ -128,6 +128,29 @@ export function collapseLayoutPairs(edges: RawLayoutEdge[]): Map<string, LayoutP
   return pairs;
 }
 
+/** Preferred ranker, then the fallback used when network-simplex hits a known
+ *  dagre bug (empty-array `.reduce` in `enterEdge` on some weighted topologies —
+ *  e.g. a hub table with several high-weight same-module edges). */
+const RANKERS: Array<'network-simplex' | 'tight-tree'> = ['network-simplex', 'tight-tree'];
+
+/**
+ * Run dagre.layout, falling back to `tight-tree` if `network-simplex` throws.
+ * Exposed for unit tests that assert the fallback path.
+ */
+export function layoutDagreGraph(g: dagre.graphlib.Graph): void {
+  let lastErr: unknown;
+  for (const ranker of RANKERS) {
+    g.setGraph({ ...g.graph(), ranker });
+    try {
+      dagre.layout(g);
+      return;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
 export function arrangeForPublication(cy: Core): void {
   const tables = cy.nodes('[type = "table"]');
   if (tables.length === 0) return;
@@ -188,7 +211,7 @@ export function arrangeForPublication(cy: Core): void {
     g.setEdge(p.parent, p.child, { weight: p.weight, minlen: 1 }, key);
   });
 
-  dagre.layout(g);
+  layoutDagreGraph(g);
 
   cy.batch(() => {
     let maxX = -Infinity;
