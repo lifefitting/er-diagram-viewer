@@ -3,6 +3,7 @@ import cytoscape from 'cytoscape';
 import * as dagre from '@dagrejs/dagre';
 import {
   arrangeForPublication,
+  isEmptyReduceError,
   layoutDagreGraph,
   layoutEdgeWeight,
   collapseLayoutPairs,
@@ -195,9 +196,21 @@ describe('layoutDagreGraph / network-simplex fallback', () => {
     return g;
   }
 
-  it('network-simplex alone still throws on the weighted hub topology', () => {
+  it('network-simplex alone still throws on FRACTIONAL weights (upstream canary)', () => {
+    // If a dagre upgrade makes this pass, the WEIGHT_SCALE workaround and the
+    // tight-tree insurance in layoutDagreGraph can both be removed.
     const g = buildWeightedGraph('network-simplex');
     expect(() => dagre.layout(g)).toThrow(/reduce of empty array/i);
+  });
+
+  it('integer weights (the WEIGHT_SCALE workaround) avoid the bug entirely', () => {
+    // Same topology, weights ×50 — network-simplex succeeds with no fallback.
+    const g = buildWeightedGraph('network-simplex');
+    for (const e of g.edges()) {
+      const label = g.edge(e);
+      label.weight = Math.round((label.weight as number) * 50);
+    }
+    expect(() => dagre.layout(g)).not.toThrow();
   });
 
   it('falls back to tight-tree and completes layout', () => {
@@ -205,6 +218,14 @@ describe('layoutDagreGraph / network-simplex fallback', () => {
     expect(() => layoutDagreGraph(g)).not.toThrow();
     expect(g.node('tax').x).toEqual(expect.any(Number));
     expect(Number.isFinite(g.node('tax').y)).toBe(true);
+  });
+
+  it('only recovers from the known empty-reduce error, not arbitrary failures', () => {
+    expect(isEmptyReduceError(new TypeError('Reduce of empty array with no initial value'))).toBe(
+      true,
+    );
+    expect(isEmptyReduceError(new Error('some other dagre failure'))).toBe(false);
+    expect(isEmptyReduceError('not an Error instance')).toBe(false);
   });
 
   it('arrangeForPublication survives the same weighted topology on the canvas', () => {

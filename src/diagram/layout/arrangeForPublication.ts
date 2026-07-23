@@ -128,27 +128,45 @@ export function collapseLayoutPairs(edges: RawLayoutEdge[]): Map<string, LayoutP
   return pairs;
 }
 
-/** Preferred ranker, then the fallback used when network-simplex hits a known
- *  dagre bug (empty-array `.reduce` in `enterEdge` on some weighted topologies —
- *  e.g. a hub table with several high-weight same-module edges). */
-const RANKERS: Array<'network-simplex' | 'tight-tree'> = ['network-simplex', 'tight-tree'];
+/**
+ * dagre's network-simplex ranker has a floating-point bug: FRACTIONAL edge
+ * weights (our ×1.8 same-module multiplier yields 1.8 / 7.2 / 0.72 …) can
+ * leave cutvalue comparisons with precision noise, so `leaveEdge` picks a
+ * "negative-cutvalue" edge for which `enterEdge` then finds no candidate —
+ * and its no-initial-value `.reduce()` throws "Reduce of empty array…"
+ * (present up to @dagrejs/dagre 3.0.0, the latest as of 2026-07).
+ *
+ * Dagre weights only matter relative to each other, so the real fix is to
+ * hand dagre INTEGERS: every `layoutEdgeWeight` tier is a multiple of 0.02,
+ * so ×50 makes them all whole numbers with the exact same ratios. Applied at
+ * the dagre boundary (not inside `layoutEdgeWeight`) because the fractional
+ * tiers are a readable priority language; the integer requirement is purely
+ * a dagre workaround.
+ */
+const WEIGHT_SCALE = 50;
+
+/** The one dagre failure we recover from (see WEIGHT_SCALE); anything else
+ *  is an unknown bug and must surface, not silently degrade the layout. */
+export function isEmptyReduceError(err: unknown): boolean {
+  return err instanceof Error && /reduce of empty array/i.test(err.message);
+}
 
 /**
- * Run dagre.layout, falling back to `tight-tree` if `network-simplex` throws.
- * Exposed for unit tests that assert the fallback path.
+ * Run dagre.layout; on the known network-simplex empty-reduce throw, retry
+ * with the `tight-tree` ranker. WEIGHT_SCALE should make this path
+ * unreachable, but the upstream bug's exact trigger set isn't proven — a
+ * degraded-but-complete layout beats a blank canvas. Safe to retry on the
+ * same graph: dagre computes on an internal copy and only writes back on
+ * success, so a throw leaves the input untouched.
  */
 export function layoutDagreGraph(g: dagre.graphlib.Graph): void {
-  let lastErr: unknown;
-  for (const ranker of RANKERS) {
-    g.setGraph({ ...g.graph(), ranker });
-    try {
-      dagre.layout(g);
-      return;
-    } catch (err) {
-      lastErr = err;
-    }
+  try {
+    dagre.layout(g);
+  } catch (err) {
+    if (!isEmptyReduceError(err)) throw err;
+    g.setGraph({ ...g.graph(), ranker: 'tight-tree' });
+    dagre.layout(g);
   }
-  throw lastErr;
 }
 
 export function arrangeForPublication(cy: Core): void {
@@ -208,7 +226,9 @@ export function arrangeForPublication(cy: Core): void {
   });
 
   pairs.forEach((p, key) => {
-    g.setEdge(p.parent, p.child, { weight: p.weight, minlen: 1 }, key);
+    // Math.round soaks up float noise from summing fractional tiers in
+    // collapseLayoutPairs (e.g. 0.4 * 1.8 * 50 = 36.000000000000006).
+    g.setEdge(p.parent, p.child, { weight: Math.round(p.weight * WEIGHT_SCALE), minlen: 1 }, key);
   });
 
   layoutDagreGraph(g);

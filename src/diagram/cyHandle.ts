@@ -45,6 +45,22 @@ export interface CyView {
 
 let view: CyView | null = null;
 
+/** Subscribers to view (re)binding. The canvas can remount UNDER a
+ *  still-mounted consumer — an archive import bumps `workspaceEpoch`, which
+ *  keys `<DiagramCanvas>` only, so `CanvasControls` keeps its mount while the
+ *  cy instance it subscribed to is destroyed. Consumers listen here and
+ *  re-attach their cy subscriptions to the fresh view. */
+const viewListeners = new Set<(v: CyView | null) => void>();
+
+/** Subscribe to view bind/unbind; returns an unsubscribe fn. The callback is
+ *  NOT invoked with the current view on subscribe — read `getView()` first. */
+export function onViewChange(cb: (v: CyView | null) => void): () => void {
+  viewListeners.add(cb);
+  return () => {
+    viewListeners.delete(cb);
+  };
+}
+
 // ---- Undo/redo snapshot machinery (session-only; never persisted) ----------
 let undoStack: LayoutSnapshot[] = [];
 let redoStack: LayoutSnapshot[] = [];
@@ -63,6 +79,7 @@ function syncFlags(): void {
 /** Set by DiagramCanvas on mount. */
 export function bindView(v: CyView): void {
   view = v;
+  viewListeners.forEach((cb) => cb(v));
 }
 
 /** Called by DiagramCanvas on unmount — also clears history (the snapshots
@@ -71,6 +88,7 @@ export function unbindView(): void {
   view = null;
   resetHistory();
   unbindHistory();
+  viewListeners.forEach((cb) => cb(null));
 }
 
 export function getView(): CyView | null {

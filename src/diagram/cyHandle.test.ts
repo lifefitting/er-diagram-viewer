@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  bindView,
+  unbindView,
+  getView,
+  onViewChange,
   bindHistory,
   unbindHistory,
   seedHistory,
@@ -8,6 +12,7 @@ import {
   undo,
   redo,
   getIsApplying,
+  type CyView,
   type LayoutSnapshot,
 } from './cyHandle';
 
@@ -93,5 +98,61 @@ describe('cyHandle history', () => {
     undo();
     expect(seen).toEqual([true]);
     expect(getIsApplying()).toBe(false);
+  });
+});
+
+describe('cyHandle view binding notifications', () => {
+  const makeView = (zoom: number): CyView => ({
+    cy: null,
+    relayout: () => {},
+    fit: () => {},
+    resetZoom: () => {},
+    zoomToSelection: () => {},
+    centerOnNode: () => {},
+    getZoom: () => zoom,
+    onZoomChange: () => () => {},
+  });
+
+  beforeEach(() => {
+    unbindView();
+  });
+
+  it('notifies subscribers on bind and unbind', () => {
+    const seen: Array<CyView | null> = [];
+    const unsub = onViewChange((v) => seen.push(v));
+    const v1 = makeView(1);
+    bindView(v1);
+    unbindView();
+    unsub();
+    expect(seen).toEqual([v1, null]);
+  });
+
+  it('a REBIND (canvas remount under a live consumer) delivers the fresh view', () => {
+    // The workspaceEpoch remount: unbind old canvas → bind new one, while
+    // CanvasControls stays mounted. Its zoom readout must follow the new view
+    // instead of staying subscribed to the destroyed cy instance.
+    const v1 = makeView(1);
+    const v2 = makeView(0.64);
+    bindView(v1);
+
+    let current: CyView | null = getView();
+    const unsub = onViewChange((v) => {
+      current = v;
+    });
+
+    unbindView(); // old canvas unmounts
+    bindView(v2); // new canvas mounts
+    expect(current).toBe(v2);
+    expect(current!.getZoom()).toBe(0.64);
+    unsub();
+  });
+
+  it('unsubscribe stops notifications', () => {
+    const seen: Array<CyView | null> = [];
+    const unsub = onViewChange((v) => seen.push(v));
+    unsub();
+    bindView(makeView(2));
+    expect(seen).toEqual([]);
+    unbindView();
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import type { Core } from 'cytoscape';
-import { getCy, getView, relayoutCurrent } from '../../diagram/cyHandle';
+import { getCy, getView, onViewChange, relayoutCurrent, type CyView } from '../../diagram/cyHandle';
 import { useApp } from '../../store';
 import { MinusIcon, PlusIcon, HelpIcon, HandIcon, UndoIcon, RedoIcon } from './icons';
 import { PILL } from './pill';
@@ -58,27 +58,30 @@ export function CanvasControls() {
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
-  // Live zoom %. The canvas is lazy, so cy (and the bound view) may not exist
-  // yet — poll getView() until bound, then subscribe to its zoom changes. Every
-  // zoom path (buttons, popover, wheel) goes through cy.zoom/fit which fires the
-  // 'zoom' event, so the readout stays in sync for free.
+  // Live zoom %. Every zoom path (buttons, popover, ⌘-wheel, viewport restore)
+  // goes through cy.zoom/viewport/fit which all fire the 'zoom' event, so
+  // subscribing to the bound view keeps the readout in sync. CRITICAL: the
+  // canvas can remount UNDER this component (archive import bumps
+  // `workspaceEpoch`, which keys `<DiagramCanvas>` only) — the cy instance we
+  // subscribed to gets destroyed while we stay mounted. `onViewChange` fires on
+  // every bind/unbind, so we re-attach to the fresh view instead of staying
+  // frozen on the dead one. It also covers the initial lazy mount (view is null
+  // until the canvas chunk loads and binds), replacing the old 250ms poll.
   useEffect(() => {
-    let unsub: (() => void) | null = null;
-    const attach = () => {
-      const view = getView();
-      if (!view) return false;
+    let unsubZoom: (() => void) | null = null;
+    const attach = (view: CyView | null) => {
+      unsubZoom?.();
+      unsubZoom = null;
+      if (!view) return;
       const update = () => setZoomPct(Math.round(view.getZoom() * 100));
       update();
-      unsub = view.onZoomChange(update);
-      return true;
+      unsubZoom = view.onZoomChange(update);
     };
-    if (attach()) return () => unsub?.();
-    const id = window.setInterval(() => {
-      if (attach()) window.clearInterval(id);
-    }, 250);
+    attach(getView());
+    const unsubView = onViewChange(attach);
     return () => {
-      window.clearInterval(id);
-      unsub?.();
+      unsubView();
+      unsubZoom?.();
     };
   }, []);
 
