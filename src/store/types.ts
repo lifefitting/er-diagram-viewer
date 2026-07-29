@@ -31,6 +31,10 @@ export interface SchemaState {
    *  scan — logical-link inference runs ONLY for these. Persisted (a refresh
    *  re-derives the same candidates); cleared on a new import (`setSql`). */
   logicalKeys: string[];
+  /** Source workspaces retained by a multi-archive import. Each group owns the
+   *  tables and logical-key scope from one archive, plus a camera bookmark for
+   *  quick navigation. Empty for a normal SQL/single-archive workspace. */
+  workspaceGroups: WorkspaceGroup[];
   /** Bumped by `importWorkspace`; keys the DiagramCanvas so an archive import
    *  remounts it. A fresh mount is what re-arms the one-shot camera restore
    *  and discards stale in-session positions — i.e. the import replays the
@@ -116,6 +120,30 @@ export interface Viewport {
   zoom: number;
 }
 
+/** Persisted provenance + navigation metadata for one member of a merged
+ *  workspace. `translation` is the one rigid model-space offset applied to
+ *  every saved node and route point from the source archive. */
+export interface WorkspaceGroup {
+  id: string;
+  label: string;
+  sourceFile: string;
+  nodeIds: string[];
+  logicalKeys: string[];
+  palette: PaletteName;
+  viewport: Viewport | null;
+  translation: { x: number; y: number };
+}
+
+/** A table-level review decision. Marking a table for deletion also hides it
+ *  from the working canvas, but this metadata makes the action an auditable
+ *  review record instead of an anonymous recycle-bin flag. */
+export interface TableDeleteDecision {
+  action: 'delete';
+  /** ISO timestamp for when the reviewer marked the table. Empty only for
+   *  legacy snapshots that stored `true` without an operation time. */
+  updatedAt: string;
+}
+
 export interface CanvasState {
   sidebarCollapsed: boolean;
   collapsed: Record<string, boolean>;
@@ -130,10 +158,10 @@ export interface CanvasState {
    *  ports; `updateEdgeEndpoints` re-docks the interior bends onto the live
    *  ports. Same persistence lifecycle as `nodePositions`. */
   manualRoutes: Record<string, { x: number; y: number }[]>;
-  /** Tables hidden via the recycle bin, keyed by cy node id (`t:`+lowercase).
-   *  Filtered out of the diagram + exports by `visibleSchema`; the SQL is never
-   *  touched. Same persistence lifecycle as `nodePositions`. */
-  deletedTables: Record<string, true>;
+  /** Tables marked 建议删除, keyed by cy node id (`t:`+lowercase). The mark is
+   *  an auditable review decision (action + time) and also hides the card from
+   *  the canvas; the SQL is never touched. Same lifecycle as `nodePositions`. */
+  deletedTables: Record<string, TableDeleteDecision>;
   /** Persisted camera (cy.pan() + cy.zoom()) so a refresh restores the exact
    *  on-screen view, not just node positions. Same lifecycle as `nodePositions`:
    *  cleared on a new import (`setSql`), kept on refresh (`reparse`). `null`

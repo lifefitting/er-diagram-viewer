@@ -111,9 +111,7 @@ describe('setManualFkKind (手动连线面板的类型切换)', () => {
     expect(logical.kind).toBe('logical');
     expect(logical.fromTable).toBe('check_task_detail'); // drawn direction kept
     // Flip back to physical: the FK must point drag-start → drag-end again.
-    const err2 = useApp
-      .getState()
-      .setManualFkKind(canonicalFkKey(logical), 'fk');
+    const err2 = useApp.getState().setManualFkKind(canonicalFkKey(logical), 'fk');
     expect(err2).toBeNull();
     const fk = useApp.getState().manualFks[0];
     expect(fk.kind).toBe('fk');
@@ -162,7 +160,7 @@ describe('effectiveForeignKeys with manual FKs', () => {
       inferred,
       {},
       false,
-      { 't:biz_check_task': true },
+      { 't:biz_check_task': { action: 'delete', updatedAt: '' } },
       [MANUAL],
     );
     expect(out.some((fk) => canonicalFkKey(fk) === canonicalFkKey(MANUAL))).toBe(false);

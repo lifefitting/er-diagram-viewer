@@ -10,6 +10,9 @@ describe('collapseAll excludes recycle-binned tables (finding 5)', () => {
 
   it('collapses only tables on the canvas', () => {
     useApp.getState().deleteTables(['t:b']); // recycle-bin table b (keyed by node id)
+    const decision = useApp.getState().deletedTables['t:b'];
+    expect(decision.action).toBe('delete');
+    expect(Number.isNaN(new Date(decision.updatedAt).getTime())).toBe(false);
     useApp.getState().collapseAll();
     const collapsed = useApp.getState().collapsed;
     expect(collapsed.a).toBe(true);

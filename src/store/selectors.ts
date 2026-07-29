@@ -3,6 +3,7 @@ import { fkKey, type InferredFK } from '../infer/inferForeignKeys';
 // `nodeId` lives in its own dependency-free module, so importing it here does
 // NOT pull the cytoscape-heavy diagram layer into the store/main bundle.
 import { nodeId as hiddenKey } from '../diagram/nodeId';
+import type { TableDeleteDecision } from './types';
 
 /**
  * The schema with recycle-bin'd tables (and any explicit FK touching one)
@@ -13,7 +14,7 @@ import { nodeId as hiddenKey } from '../diagram/nodeId';
  */
 export function visibleSchema(
   schema: Schema | null,
-  deletedTables: Record<string, true>,
+  deletedTables: Record<string, TableDeleteDecision>,
 ): Schema | null {
   if (!schema || Object.keys(deletedTables).length === 0) return schema;
   return {
@@ -47,7 +48,7 @@ export function effectiveForeignKeys(
   inferred: InferredFK[],
   decisions: Record<string, 'accept' | 'reject'>,
   showLow: boolean,
-  deletedTables: Record<string, true> = {},
+  deletedTables: Record<string, TableDeleteDecision> = {},
   manualFks: ForeignKey[] = [],
   visibility: { showLogicalLinks?: boolean; showManualLinks?: boolean } = {},
 ): ForeignKey[] {

@@ -109,10 +109,9 @@ function persistLayout(cy: Core): void {
 }
 
 /**
- * Recycle-bin the given table nodes: drop the manual-route overrides for every
- * edge touching them (so a restore gets a fresh auto-route, never a stale
- * re-dock) and mark them hidden. The SQL is never touched. The caller clears
- * the selection afterward.
+ * Mark the given tables 建议删除 and hide them: drop the manual-route overrides
+ * for every edge touching them (so a restore gets a fresh auto-route, never a
+ * stale re-dock), then store an audited decision timestamp. SQL is untouched.
  */
 function hideTables(cy: Core, ids: string[]): void {
   if (ids.length === 0) return;
@@ -352,7 +351,7 @@ export function DiagramCanvas() {
         Math.max(rr.left - rect.left + Math.min(150, rr.width / 2), 156),
         rect.width - 156,
       ),
-      y: Math.min(Math.max(rr.bottom - rect.top + 6, 8), rect.height - 170),
+      y: Math.max(8, Math.min(rr.bottom - rect.top + 6, rect.height - 280)),
     });
   };
 
@@ -533,6 +532,12 @@ export function DiagramCanvas() {
       if (eles.empty()) return;
       cy.animate({ fit: { eles, padding: 80 } }, { duration: 250, easing: 'ease-in-out' });
     };
+    const fitNodesImpl = (ids: string[]) => {
+      const wanted = new Set(ids);
+      const eles = cy.nodes().filter((node) => wanted.has(node.id()));
+      if (eles.empty()) return;
+      cy.animate({ fit: { eles, padding: 80 } }, { duration: 350, easing: 'ease-in-out' });
+    };
     const centerOnNodeImpl = (id: string) => {
       const n = cy.getElementById(id);
       if (!n || n.empty()) return; // matched node may have been deleted/rebuilt
@@ -594,6 +599,7 @@ export function DiagramCanvas() {
       fit: fitImpl,
       resetZoom: resetZoomImpl,
       zoomToSelection: zoomToSelectionImpl,
+      fitNodes: fitNodesImpl,
       centerOnNode: centerOnNodeImpl,
       getZoom: () => cy.zoom(),
       onZoomChange: (cb) => {
@@ -979,6 +985,10 @@ export function DiagramCanvas() {
       if (v) {
         cy.zoom(v.zoom);
         cy.pan({ x: v.x, y: v.y });
+      } else if (useApp.getState().workspaceGroups.length > 1) {
+        // A merged import deliberately has no single winning camera. Start at
+        // an overview; the view menu exposes one-click focus for every source.
+        cy.fit(undefined, 60);
       }
     }
     // After (re)building the elements, force a full endpoint refresh so the
@@ -1776,6 +1786,17 @@ export function DiagramCanvas() {
             onDragHandle={(e) => onTableDragStart(e, p.id)}
             onResizeHandle={(e) => onTableResize(e, p.table.name, p.id)}
             onToggleCollapse={() => toggleCollapsed(p.table.name)}
+            onMarkDelete={() => {
+              const cy = cyRef.current;
+              if (!cy) return;
+              hideTables(cy, [p.id]);
+              setSelectedIds((current) => {
+                const next = new Set(current);
+                next.delete(p.id);
+                return next;
+              });
+              if (focusId === p.id) setFocusId(null);
+            }}
             onResetWidth={() => setTableWidth(p.table.name, null)}
             onConnectStart={(col, side, e) => onConnectStart(p.table.name, col, side, e)}
             noteColumns={noteColumnsByTable.get(p.table.name)}
@@ -1949,7 +1970,7 @@ export function DiagramCanvas() {
           <button
             type="button"
             className="pointer-events-auto inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"
-            title="删除选中的表（移入回收站，不改动 SQL）"
+            title="标记选中的表为建议删除（不改动 SQL）"
             onClick={() => {
               const cy = cyRef.current;
               if (!cy) return;
@@ -1959,14 +1980,14 @@ export function DiagramCanvas() {
             }}
           >
             <TrashIcon />
-            删除
+            标记删除
           </button>
           <span className="text-ink-400 dark:text-inkd-500">Esc 取消</span>
         </div>
       )}
       {schema && schema.tables.length === 0 && Object.keys(deletedTables).length > 0 && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[13px] text-ink-400 dark:text-inkd-500">
-          所有表已隐藏 · 从左下角回收站恢复
+          所有表均已标记建议删除 · 从左下角删除建议列表恢复
         </div>
       )}
     </div>
@@ -1980,6 +2001,27 @@ export function DiagramCanvas() {
  * Severity（级别）is always pickable; status（状态）only appears when editing
  * an EXISTING note — a fresh finding is 待处理 by definition.
  */
+const QUICK_FIELD_REVIEWS: ReadonlyArray<{
+  label: string;
+  text: string;
+  severity: NoteSeverity;
+}> = [
+  { label: '命名不规范', text: '字段命名不规范，建议按统一命名规范调整。', severity: 'suggest' },
+  {
+    label: '类型不合理',
+    text: '字段类型或长度不合理，建议结合实际数据范围调整。',
+    severity: 'warn',
+  },
+  { label: '缺少索引', text: '该字段可能用于查询或关联，建议补充合适的索引。', severity: 'warn' },
+  { label: '应设非空', text: '该字段属于必要数据，建议设置 NOT NULL 约束。', severity: 'warn' },
+  {
+    label: '缺少注释',
+    text: '字段缺少业务说明，建议补充清晰、可维护的注释。',
+    severity: 'suggest',
+  },
+  { label: '疑似冗余', text: '该字段疑似冗余，建议确认用途并评估删除。', severity: 'warn' },
+];
+
 function FieldNoteBubble({
   table,
   col,
@@ -2056,6 +2098,27 @@ function FieldNoteBubble({
           if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save(text);
         }}
       />
+      {!note && (
+        <div className="mt-1.5 rounded border border-amber-100 bg-amber-50/60 px-1.5 py-1 dark:border-amber-800/40 dark:bg-amber-900/15">
+          <div className="mb-1 flex items-center text-[9.5px] text-ink-400 dark:text-inkd-500">
+            <span>一键常用建议</span>
+            <span className="ml-auto">点击即保存</span>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {QUICK_FIELD_REVIEWS.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                className="h-5 rounded-full border border-amber-200 bg-white px-2 text-[10px] text-amber-800 transition-colors hover:border-amber-400 hover:bg-amber-100 dark:border-amber-700/50 dark:bg-inkd-200 dark:text-amber-300 dark:hover:bg-amber-900/30"
+                title={item.text}
+                onClick={() => onSave(item.text, { severity: item.severity, status: 'open' })}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="mt-1 flex flex-col gap-1 px-0.5">
         <NoteMetaRow label="级别">
           {NOTE_SEVERITIES.map((opt) => (

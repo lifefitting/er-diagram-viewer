@@ -9,6 +9,7 @@ import {
   ARCHIVE_EXTENSION,
   type ParseArchiveResult,
 } from '../../exports/archive';
+import { mergeWorkspaceArchives, type MergeArchivesResult } from '../../exports/mergeArchives';
 
 interface Props {
   open: boolean;
@@ -77,8 +78,10 @@ export function SqlInputDialog({ open, onClose }: Props) {
   // belongs to the SQL tab, `staged` to the archive tab — switching tabs
   // never clobbers the other side's work-in-progress.
   const [mode, setMode] = useState<ImportMode>('sql');
-  // The archive tab's staged `.erreview` file, parsed + validated.
-  const [staged, setStaged] = useState<StagedArchive | null>(null);
+  // The archive tab accepts one archive (restore) or several (merge). Keeping
+  // all parsed payloads staged lets us pre-flight the complete merge before a
+  // single atomic store update touches the current workspace.
+  const [staged, setStaged] = useState<StagedArchive[]>([]);
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +97,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
     if (open) {
       setText(currentSql);
       setLoadedFile(null);
-      setStaged(null);
+      setStaged([]);
       setMode('sql');
       setSamplesOpen(false);
       setError(null);
@@ -110,16 +113,31 @@ export function SqlInputDialog({ open, onClose }: Props) {
     }
   }, [open]);
 
+  const mergePreview = useMemo<MergeArchivesResult | null>(
+    () =>
+      staged.length > 1
+        ? mergeWorkspaceArchives(staged.map(({ archive, fileName }) => ({ archive, fileName })))
+        : null,
+    [staged],
+  );
+
   const submit = useCallback(() => {
-    const archive = mode === 'archive' ? staged?.archive : null;
-    if (mode === 'archive' && !archive) return;
+    const archive = mode === 'archive' && staged.length === 1 ? staged[0].archive : null;
+    const merged = mode === 'archive' && staged.length > 1 ? mergePreview : null;
+    if (mode === 'archive' && !archive && !merged) return;
+    if (merged && !merged.ok) {
+      setError(
+        `${merged.error}${merged.conflicts.length ? `：${merged.conflicts.join('、')}` : ''}`,
+      );
+      return;
+    }
     if (mode === 'sql' && !text.trim()) return;
     // Pre-flight parse before committing: `setSql` / `importWorkspace`
     // unconditionally replace decisions, layout and the recycle bin, so
     // garbage input (or a parser throw) must not be allowed to wipe the
     // current workspace.
     try {
-      const sql = archive ? archive.state.rawSql : text;
+      const sql = archive ? archive.state.rawSql : merged?.ok ? merged.state.rawSql : text;
       const parsed = parseSql(sql);
       if (parsed.tables.length === 0) {
         setError(
@@ -127,7 +145,8 @@ export function SqlInputDialog({ open, onClose }: Props) {
         );
         return;
       }
-      if (archive) importWorkspace(archive.state);
+      if (merged?.ok) importWorkspace(merged.state);
+      else if (archive) importWorkspace(archive.state);
       else setSql(text);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -135,7 +154,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
       return;
     }
     onClose();
-  }, [setSql, importWorkspace, mode, staged, text, onClose]);
+  }, [setSql, importWorkspace, mergePreview, mode, staged, text, onClose]);
 
   // Keyboard shortcuts: Esc closes (or first closes the samples dropdown if
   // open), ⌘/Ctrl+Enter submits. Bound at window level so the textarea,
@@ -171,33 +190,59 @@ export function SqlInputDialog({ open, onClose }: Props) {
   // One file handler for both tabs: content decides the destination（按内容
   // 路由）— an archive lands on the 工作区存档 tab, SQL lands on the SQL tab,
   // switching the dialog there so the user always sees where their file went.
-  const handleFile = useCallback(async (file: File) => {
-    const content = await file.text();
-    // Sniff by content (SQL never starts with `{`), not extension — a
-    // re-saved or mailed archive may arrive as .json/.txt.
-    if (looksLikeArchive(content)) {
-      const parsed = parseWorkspaceArchive(content);
-      if (parsed.ok) {
-        setStaged({ archive: parsed, fileName: file.name, size: file.size });
+  const handleFiles = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return;
+      const archives: StagedArchive[] = [];
+      let sqlFile: { content: string; file: File } | null = null;
+
+      for (const file of files) {
+        const content = await file.text();
+        if (looksLikeArchive(content)) {
+          const parsed = parseWorkspaceArchive(content);
+          if (parsed.ok) {
+            archives.push({ archive: parsed, fileName: file.name, size: file.size });
+            continue;
+          }
+          if (file.name.endsWith(ARCHIVE_EXTENSION) || files.length > 1 || mode === 'archive') {
+            setMode('archive');
+            setError(`无法导入存档 ${file.name}：${parsed.error}`);
+            return;
+          }
+        }
+        if (files.length > 1 || mode === 'archive') {
+          setMode('archive');
+          setError(`合并时只能选择有效的 ${ARCHIVE_EXTENSION} 工作区存档`);
+          return;
+        }
+        sqlFile = { content, file };
+      }
+
+      if (archives.length > 0) {
+        setStaged((current) => {
+          const next = [...current];
+          for (const item of archives) {
+            const existing = next.findIndex((candidate) => candidate.fileName === item.fileName);
+            if (existing >= 0) next[existing] = item;
+            else next.push(item);
+          }
+          return next;
+        });
         setMode('archive');
         setError(null);
         return;
       }
-      if (file.name.endsWith(ARCHIVE_EXTENSION)) {
-        // Definitely meant as an archive — surface why it can't load instead
-        // of dumping JSON into the SQL editor.
-        setMode('archive');
-        setError(`无法导入存档：${parsed.error}`);
-        return;
+
+      if (sqlFile) {
+        setText(sqlFile.content);
+        setLoadedFile({ name: sqlFile.file.name, size: sqlFile.file.size });
+        setMode('sql');
+        setError(null);
+        requestAnimationFrame(() => textareaRef.current?.focus());
       }
-      // JSON-ish but not ours: fall through and let the SQL parser complain.
-    }
-    setText(content);
-    setLoadedFile({ name: file.name, size: file.size });
-    setMode('sql');
-    setError(null);
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, []);
+    },
+    [mode],
+  );
 
   const onPickFile = useCallback(() => fileInputRef.current?.click(), []);
 
@@ -218,10 +263,9 @@ export function SqlInputDialog({ open, onClose }: Props) {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragOver(false);
-      const file = e.dataTransfer.files?.[0];
-      if (file) handleFile(file);
+      void handleFiles(Array.from(e.dataTransfer.files ?? []));
     },
-    [handleFile],
+    [handleFiles],
   );
 
   const stats = useMemo(() => {
@@ -229,7 +273,10 @@ export function SqlInputDialog({ open, onClose }: Props) {
     return { lines: text.split('\n').length, chars: text.length };
   }, [text]);
 
-  const submittable = mode === 'archive' ? staged !== null : text.trim().length > 0;
+  const submittable =
+    mode === 'archive'
+      ? staged.length > 0 && (staged.length === 1 || mergePreview?.ok === true)
+      : text.trim().length > 0;
   const modeTab = MODE_TABS.find((t) => t.id === mode)!;
 
   if (!open) return null;
@@ -318,11 +365,11 @@ export function SqlInputDialog({ open, onClose }: Props) {
         <input
           type="file"
           accept=".sql,.ddl,.txt,.erreview,.json,text/plain,application/json"
+          multiple={mode === 'archive'}
           hidden
           ref={fileInputRef}
           onChange={async (e) => {
-            const f = e.target.files?.[0];
-            if (f) await handleFile(f);
+            await handleFiles(Array.from(e.target.files ?? []));
             // Reset so picking the same file again still fires change.
             e.target.value = '';
           }}
@@ -421,7 +468,14 @@ export function SqlInputDialog({ open, onClose }: Props) {
               autoCorrect="off"
             />
           ) : (
-            <ArchivePanel staged={staged} onPickFile={onPickFile} onClear={() => setStaged(null)} />
+            <ArchivePanel
+              staged={staged}
+              mergePreview={mergePreview}
+              onPickFile={onPickFile}
+              onRemove={(fileName) =>
+                setStaged((current) => current.filter((item) => item.fileName !== fileName))
+              }
+            />
           )}
           {dragOver && (
             <div className="absolute inset-3 rounded-lg border-2 border-dashed border-ink-400 dark:border-inkd-500 bg-white/95 dark:bg-inkd-50/95 flex flex-col items-center justify-center gap-2 pointer-events-none">
@@ -467,7 +521,11 @@ export function SqlInputDialog({ open, onClose }: Props) {
                 </span>
               </>
             ) : (
-              <span>导入存档将替换当前工作区（批注 / 决策 / 布局一并替换）</span>
+              <span>
+                {staged.length > 1
+                  ? `${staged.length} 个存档将先安全合并，再一次性替换当前工作区`
+                  : '导入存档将替换当前工作区（批注 / 决策 / 布局一并替换）'}
+              </span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -491,11 +549,13 @@ export function SqlInputDialog({ open, onClose }: Props) {
               disabled={!submittable}
               title={
                 mode === 'archive'
-                  ? '导入存档，恢复评审现场 (⌘/Ctrl+Enter)'
+                  ? staged.length > 1
+                    ? '合并并导入存档 (⌘/Ctrl+Enter)'
+                    : '导入存档，恢复评审现场 (⌘/Ctrl+Enter)'
                   : '解析并绘制 (⌘/Ctrl+Enter)'
               }
             >
-              {mode === 'archive' ? '导入存档' : '解析并绘制'}
+              {mode === 'archive' ? (staged.length > 1 ? '合并并导入' : '导入存档') : '解析并绘制'}
               <Kbd inverted={submittable}>⌘↵</Kbd>
             </button>
           </div>
@@ -514,14 +574,16 @@ export function SqlInputDialog({ open, onClose }: Props) {
  */
 function ArchivePanel({
   staged,
+  mergePreview,
   onPickFile,
-  onClear,
+  onRemove,
 }: {
-  staged: StagedArchive | null;
+  staged: StagedArchive[];
+  mergePreview: MergeArchivesResult | null;
   onPickFile: () => void;
-  onClear: () => void;
+  onRemove: (fileName: string) => void;
 }) {
-  if (!staged) {
+  if (staged.length === 0) {
     return (
       <div className="absolute inset-0 flex items-center justify-center p-6">
         <div className="flex w-[420px] max-w-full flex-col items-center gap-3 rounded-xl border-2 border-dashed border-ink-200 px-6 py-10 text-center dark:border-inkd-300">
@@ -529,14 +591,14 @@ function ArchivePanel({
             <DropIcon />
           </div>
           <div className="text-sm font-medium text-ink-800 dark:text-inkd-800">
-            导入工作区存档（{ARCHIVE_EXTENSION}）
+            导入或合并工作区存档（{ARCHIVE_EXTENSION}）
           </div>
           <div className="text-[11.5px] leading-relaxed text-ink-400 dark:text-inkd-500">
-            存档由「导出 → 工作区存档」生成，包含 SQL、批注、关系决策、
-            手动连线与画布布局——导入后从上次中断的地方继续评审。
+            可一次选择多个存档。合并时保留每个工作区的内部布局，
+            仅在区域重叠时整体平移，并提供一键查看入口。
           </div>
           <SecondaryButton onClick={onPickFile} icon={<UploadIcon />}>
-            选择存档文件
+            选择一个或多个存档
           </SecondaryButton>
           <div className="text-[10.5px] text-ink-300 dark:text-inkd-500">
             也可以直接把文件拖到这个窗口
@@ -546,56 +608,101 @@ function ArchivePanel({
     );
   }
 
-  const { archive, fileName, size } = staged;
-  const st = archive.state;
-  const metaRows: Array<[string, string]> = [
-    [
-      '导出时间',
-      archive.meta.exportedAt ? archive.meta.exportedAt.slice(0, 16).replace('T', ' ') : '未知',
-    ],
-    ['应用版本', archive.meta.appVersion || '未知'],
-    ['表', String(archive.meta.tableCount || '?')],
-    ['关系决策', String(Object.keys(st.decisions ?? {}).length)],
-    ['手动连线', String((st.manualFks ?? []).length)],
-    ['字段批注', String(Object.keys(st.fieldNotes ?? {}).length)],
-  ];
-
   return (
     <div className="absolute inset-0 overflow-y-auto p-5">
-      <div className="mx-auto flex w-[560px] max-w-full flex-col gap-3">
-        <div className="rounded-lg border border-ink-100 bg-ink-50/40 p-3 dark:border-inkd-300 dark:bg-inkd-50/40">
-          <div className="flex items-center gap-1.5 text-[12px] text-ink-800 dark:text-inkd-800">
-            <FileIcon />
-            <span className="font-mono font-medium truncate">{fileName}</span>
-            <span className="text-ink-400 dark:text-inkd-500">· {formatBytes(size)}</span>
-            <button
-              type="button"
-              className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[11px] text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:text-inkd-500 dark:hover:bg-inkd-200 dark:hover:text-inkd-800"
-              onClick={onClear}
-            >
-              重新选择
-            </button>
+      <div className="mx-auto flex w-[640px] max-w-full flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="text-[12px] font-medium text-ink-700 dark:text-inkd-700">
+            已选择 {staged.length} 个存档
           </div>
-          <dl className="mt-2 grid grid-cols-3 gap-x-4 gap-y-1.5">
-            {metaRows.map(([k, v]) => (
-              <div key={k} className="flex flex-col">
-                <dt className="text-[10px] text-ink-400 dark:text-inkd-500">{k}</dt>
-                <dd className="text-[12px] tabular-nums text-ink-800 dark:text-inkd-800">{v}</dd>
-              </div>
-            ))}
-          </dl>
+          <SecondaryButton onClick={onPickFile} icon={<UploadIcon />}>
+            添加存档
+          </SecondaryButton>
         </div>
-        {archive.downgraded && (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11.5px] leading-snug text-amber-800 dark:border-amber-700/50 dark:bg-amber-900/25 dark:text-amber-300">
-            存档来自不兼容的旧版本：仅恢复 SQL 脚本，批注 / 决策 / 布局将重新开始。
+
+        {mergePreview &&
+          (mergePreview.ok ? (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11.5px] leading-relaxed text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-900/25 dark:text-emerald-300">
+              将合并为 {mergePreview.summary.tableCount} 张表；
+              {mergePreview.summary.shiftedGroups === 0
+                ? '两个工作区均保留原始绝对坐标。'
+                : `${mergePreview.summary.shiftedGroups} 个工作区会整体平移以避让重叠。`}
+              {mergePreview.summary.warnings.map((warning) => (
+                <div key={warning}>· {warning}</div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] leading-relaxed text-rose-800 dark:border-rose-700/50 dark:bg-rose-900/25 dark:text-rose-300">
+              {mergePreview.error}
+              {mergePreview.conflicts.map((conflict) => (
+                <div key={conflict}>· {conflict}</div>
+              ))}
+            </div>
+          ))}
+
+        <div className="flex flex-col gap-2">
+          {staged.map(({ archive, fileName, size }) => {
+            const st = archive.state;
+            const metaRows: Array<[string, string]> = [
+              ['表', String(archive.meta.tableCount || '?')],
+              ['关系决策', String(Object.keys(st.decisions ?? {}).length)],
+              ['手工连线', String((st.manualFks ?? []).length)],
+              ['保存位置', String(Object.keys(st.nodePositions ?? {}).length)],
+              ['手工路由', String(Object.keys(st.manualRoutes ?? {}).length)],
+              [
+                '导出时间',
+                archive.meta.exportedAt
+                  ? archive.meta.exportedAt.slice(0, 16).replace('T', ' ')
+                  : '未知',
+              ],
+            ];
+            return (
+              <div
+                key={fileName}
+                className="rounded-lg border border-ink-100 bg-ink-50/40 p-3 dark:border-inkd-300 dark:bg-inkd-50/40"
+              >
+                <div className="flex items-center gap-1.5 text-[12px] text-ink-800 dark:text-inkd-800">
+                  <FileIcon />
+                  <span className="font-mono font-medium truncate">{fileName}</span>
+                  <span className="text-ink-400 dark:text-inkd-500">· {formatBytes(size)}</span>
+                  <button
+                    type="button"
+                    className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[11px] text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:text-inkd-500 dark:hover:bg-inkd-200 dark:hover:text-inkd-800"
+                    onClick={() => onRemove(fileName)}
+                  >
+                    移除
+                  </button>
+                </div>
+                <dl className="mt-2 grid grid-cols-3 gap-x-4 gap-y-1.5">
+                  {metaRows.map(([key, value]) => (
+                    <div key={key} className="flex flex-col">
+                      <dt className="text-[10px] text-ink-400 dark:text-inkd-500">{key}</dt>
+                      <dd className="text-[12px] tabular-nums text-ink-800 dark:text-inkd-800">
+                        {value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                {archive.downgraded && (
+                  <div className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
+                    旧版本存档：仅 SQL 可用，不能参与保布局合并。
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {staged.length === 1 && (
+          <div className="min-h-0">
+            <div className="mb-1 text-[10.5px] text-ink-400 dark:text-inkd-500">
+              SQL 预览（只读）
+            </div>
+            <pre className="max-h-36 overflow-auto rounded-md border border-ink-100 bg-white px-3 py-2 font-mono text-[11.5px] leading-[1.5] text-ink-700 dark:border-inkd-300 dark:bg-inkd-50 dark:text-inkd-700">
+              {staged[0].archive.state.rawSql}
+            </pre>
           </div>
         )}
-        <div className="min-h-0">
-          <div className="mb-1 text-[10.5px] text-ink-400 dark:text-inkd-500">SQL 预览（只读）</div>
-          <pre className="max-h-44 overflow-auto rounded-md border border-ink-100 bg-white px-3 py-2 font-mono text-[11.5px] leading-[1.5] text-ink-700 dark:border-inkd-300 dark:bg-inkd-50 dark:text-inkd-700">
-            {st.rawSql}
-          </pre>
-        </div>
       </div>
     </div>
   );

@@ -18,9 +18,9 @@ export interface ReportInput {
   inferred: InferredFK[];
   decisions: Record<string, 'accept' | 'reject'>;
   manualFks: ForeignKey[];
-  /** Original names of recycle-bin'd tables (edges touching them are excluded
-   *  from the sections above and called out at the end). */
-  deletedTableNames: string[];
+  /** Auditable table-level decisions. Tables marked delete are already absent
+   *  from `schema`; their names and operation times remain in this report. */
+  tableDecisions?: Array<{ table: string; action: 'delete'; updatedAt: string }>;
   /** Field-level review annotations, keyed `table::column` (fieldNoteKey);
    *  each carries the text, WHEN it was written, plus 级别/状态 (absent on
    *  legacy notes → 建议/待处理). */
@@ -42,13 +42,14 @@ export interface ReportInput {
 }
 
 export function buildReviewReport(input: ReportInput): string {
-  const { schema, inferred, decisions, manualFks, deletedTableNames } = input;
+  const { schema, inferred, decisions, manualFks } = input;
+  const tableDecisions = input.tableDecisions ?? [];
   const fieldNotes = input.fieldNotes ?? {};
   const includeFkCandidates = input.include?.inferredFkCandidates ?? true;
   const includeLogicalCandidates = input.include?.logicalCandidates ?? true;
   const when = input.generatedAt ?? new Date();
 
-  const hiddenLower = new Set(deletedTableNames.map((n) => n.toLowerCase()));
+  const hiddenLower = new Set(tableDecisions.map((decision) => decision.table.toLowerCase()));
   const touchesHidden = (fk: ForeignKey) =>
     hiddenLower.has(fk.fromTable.toLowerCase()) || hiddenLower.has(fk.toTable.toLowerCase());
 
@@ -69,7 +70,7 @@ export function buildReviewReport(input: ReportInput): string {
     `\`${fk.fromTable}.${fk.fromColumns.join(',')}\` ${sep} \`${fk.toTable}.${fk.toColumns.join(',')}\``;
 
   const lines: string[] = [];
-  lines.push('# 数据库关系评审报告');
+  lines.push('# 数据库评审记录');
   lines.push('');
   lines.push(`- 生成时间：${formatDate(when)}`);
   lines.push(`- 表：${schema.tables.length} 张`);
@@ -83,6 +84,23 @@ export function buildReviewReport(input: ReportInput): string {
     !includeLogicalCandidates ? '逻辑关联候选' : '',
   ].filter(Boolean);
   if (omitted.length) lines.push(`- 本报告按导出选项省略：${omitted.join('、')}`);
+  lines.push('');
+
+  lines.push('## 表级评审决策');
+  lines.push('');
+  if (tableDecisions.length === 0) {
+    lines.push('（无）');
+  } else {
+    lines.push('| 表名 | 操作时间 | 决策 |');
+    lines.push('| --- | --- | --- |');
+    for (const decision of [...tableDecisions].sort((a, b) =>
+      (b.updatedAt || '').localeCompare(a.updatedAt || ''),
+    )) {
+      lines.push(
+        `| \`${decision.table}\` | ${decision.updatedAt ? formatIso(decision.updatedAt) : '—'} | 标记删除 |`,
+      );
+    }
+  }
   lines.push('');
 
   lines.push('## 物理外键（DDL 显式声明）');
@@ -129,11 +147,9 @@ export function buildReviewReport(input: ReportInput): string {
   }
   lines.push('');
 
-  // Field-level review annotations, grouped by 级别 (阻塞 → 警告 → 建议) with
-  // each note's 状态 inline — a multi-round review reads this section as its
-  // work queue. Within a severity group, schema table order then column order.
-  // Notes on recycle-bin'd tables are held back with the other excluded
-  // material.
+  // Field-level review annotations use one audit-friendly table. Keep 级别 and
+  // 状态 inside the suggestion cell so the four requested record columns stay
+  // stable: 时间、表、字段、评审建议.
   const noteEntries = Object.entries(fieldNotes)
     .map(([key, note]) => {
       const i = key.indexOf('::');
@@ -169,38 +185,30 @@ export function buildReviewReport(input: ReportInput): string {
           .join(' · '),
     );
     lines.push('');
-    const tableOrder = new Map(schema.tables.map((t, i) => [t.name, i]));
-    for (const sev of ['block', 'warn', 'suggest'] as const) {
-      const group = visibleNotes
-        .filter((n) => n.severity === sev)
-        .sort(
-          (a, b) =>
-            (tableOrder.get(a.table) ?? 999) - (tableOrder.get(b.table) ?? 999) ||
-            a.column.localeCompare(b.column),
-        );
-      if (group.length === 0) continue;
-      lines.push(`### ${severityLabel(sev)}（${group.length}）`);
-      lines.push('');
-      for (const n of group) {
-        const at = n.updatedAt ? formatIso(n.updatedAt) : '';
-        lines.push(
-          `- **[${statusLabel(n.status)}]** \`${n.table}.${n.column}\`${at ? `（${at}）` : ''}`,
-        );
-        for (const l of n.text.split('\n')) lines.push(`  > ${l}`);
-      }
-      lines.push('');
+    lines.push('| 时间 | 表 | 字段 | 评审建议 |');
+    lines.push('| --- | --- | --- | --- |');
+    const sorted = [...visibleNotes].sort(
+      (a, b) =>
+        (b.updatedAt || '').localeCompare(a.updatedAt || '') ||
+        a.table.localeCompare(b.table) ||
+        a.column.localeCompare(b.column),
+    );
+    for (const note of sorted) {
+      const at = note.updatedAt ? formatIso(note.updatedAt) : '—';
+      const meta = `${severityLabel(note.severity)} · ${statusLabel(note.status)}`;
+      lines.push(
+        `| ${at} | \`${note.table}\` | \`${note.column}\` | **${meta}** — ${cell(note.text)} |`,
+      );
     }
-  }
-
-  if (deletedTableNames.length > 0) {
-    lines.push('## 已排除（回收站）');
-    lines.push('');
-    lines.push(`以下 ${deletedTableNames.length} 张表已从视图中隐藏，其关联边未纳入上述统计：`);
-    for (const name of deletedTableNames) lines.push(`- \`${name}\``);
     lines.push('');
   }
 
   return lines.join('\n');
+}
+
+/** Escape text into one Markdown table cell. */
+function cell(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
 }
 
 function formatDate(d: Date): string {

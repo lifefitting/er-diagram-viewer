@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+demo/
+graphify-out/
 
 # Build artifacts
 dist/

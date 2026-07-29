@@ -63,10 +63,9 @@ describe('buildReviewReport', () => {
       inferred: [fkCandidate, logicalCandidate],
       decisions: { [canonicalFkKey(fkCandidate)]: 'accept' },
       manualFks: [manualLogical],
-      deletedTableNames: [],
       generatedAt: AT,
     });
-    expect(md).toContain('# 数据库关系评审报告');
+    expect(md).toContain('# 数据库评审记录');
     expect(md).toContain('2026-07-11 10:30');
     expect(md).toContain('`orders.user_id` → `users.id`（`fk_o_u`）');
     expect(md).toContain('[已接受] `payments.order_id` → `orders.id` · 置信度 high');
@@ -74,13 +73,19 @@ describe('buildReviewReport', () => {
     expect(md).toContain('[手动添加] `orders.batch_no` ~ `payments.batch_no`');
   });
 
-  it('renders field review notes grouped by 级别 with 状态 inline, excluding hidden tables', () => {
+  it('renders table decisions and field reviews as audit tables, excluding hidden-table notes', () => {
     const md = buildReviewReport({
       schema,
       inferred: [],
       decisions: {},
       manualFks: [],
-      deletedTableNames: ['users'],
+      tableDecisions: [
+        {
+          table: 'users',
+          action: 'delete',
+          updatedAt: new Date(2026, 6, 11, 8, 45).toISOString(),
+        },
+      ],
       fieldNotes: {
         'orders::out_trade_no': {
           text: '命名建议改为 external_trade_no\n且应加唯一索引',
@@ -94,18 +99,17 @@ describe('buildReviewReport', () => {
       },
       generatedAt: AT,
     });
+    expect(md).toContain('## 表级评审决策');
+    expect(md).toContain('| 表名 | 操作时间 | 决策 |');
+    expect(md).toContain('| `users` | 2026-07-11 08:45 | 标记删除 |');
     expect(md).toContain('## 字段评审意见');
     // summary counts exclude the hidden-table note
     expect(md).toContain('共 2 条：阻塞 1 · 警告 0 · 建议 1；待处理 1 · 已采纳 1 · 不采纳 0');
-    // severity groups in escalation order, status inline
-    expect(md).toContain('### 阻塞（1）');
-    expect(md).toContain('- **[已采纳]** `orders.out_trade_no`（2026-07-11 09:05）');
-    expect(md).toContain('  > 命名建议改为 external_trade_no');
-    expect(md).toContain('  > 且应加唯一索引');
-    expect(md).toContain('### 建议（1）');
-    expect(md).toContain('- **[待处理]** `orders.id`');
-    expect(md.indexOf('### 阻塞')).toBeLessThan(md.indexOf('### 建议'));
-    expect(md).not.toContain('### 警告');
+    expect(md).toContain('| 时间 | 表 | 字段 | 评审建议 |');
+    expect(md).toContain(
+      '| 2026-07-11 09:05 | `orders` | `out_trade_no` | **阻塞 · 已采纳** — 命名建议改为 external_trade_no<br>且应加唯一索引 |',
+    );
+    expect(md).toContain('| — | `orders` | `id` | **建议 · 待处理** — 主键类型建议 BIGINT |');
     expect(md).not.toContain('隐藏表上的批注');
   });
 
@@ -115,7 +119,6 @@ describe('buildReviewReport', () => {
       inferred: [fkCandidate, logicalCandidate],
       decisions: {},
       manualFks: [manualLogical],
-      deletedTableNames: [],
       include: { inferredFkCandidates: false, logicalCandidates: false },
       generatedAt: AT,
     });
@@ -132,11 +135,12 @@ describe('buildReviewReport', () => {
       inferred: [fkCandidate, logicalCandidate],
       decisions: { [canonicalFkKey(fkCandidate)]: 'reject' },
       manualFks: [],
-      deletedTableNames: ['payments'],
+      tableDecisions: [
+        { table: 'payments', action: 'delete', updatedAt: '2026-07-11T01:00:00.000Z' },
+      ],
       generatedAt: AT,
     });
-    expect(md).toContain('## 已排除（回收站）');
-    expect(md).toContain('- `payments`');
+    expect(md).toContain('| `payments` | 2026-07-11 09:00 | 标记删除 |');
     // Both candidates touch payments → dropped from the candidate sections.
     expect(md).not.toContain('payments.order_id');
     expect(md).not.toContain('out_trade_no');

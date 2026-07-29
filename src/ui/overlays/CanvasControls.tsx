@@ -37,7 +37,6 @@ function zoomStep(dir: 1 | -1): void {
   cy.zoom({ level: next, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
 }
 
-
 export function CanvasControls() {
   const canvasMode = useApp((s) => s.canvasMode);
   const toggleCanvasMode = useApp((s) => s.toggleCanvasMode);
@@ -45,6 +44,7 @@ export function CanvasControls() {
   const canRedo = useApp((s) => s.canRedo);
   const undo = useApp((s) => s.undo);
   const redo = useApp((s) => s.redo);
+  const workspaceGroups = useApp((s) => s.workspaceGroups);
 
   const [openPopover, setOpenPopover] = useState<'help' | 'zoom' | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -123,7 +123,12 @@ export function CanvasControls() {
       {/* Pill 2 — hand tool + zoom (relative so the view popover anchors here) */}
       <div className="relative">
         {openPopover === 'zoom' && (
-          <ViewMenu isFullscreen={isFullscreen} onFullscreen={toggleFullscreen} onClose={() => setOpenPopover(null)} />
+          <ViewMenu
+            isFullscreen={isFullscreen}
+            workspaceGroups={workspaceGroups}
+            onFullscreen={toggleFullscreen}
+            onClose={() => setOpenPopover(null)}
+          />
         )}
         <div className={PILL} role="toolbar" aria-label="缩放与平移">
           <PillButton
@@ -174,10 +179,12 @@ export function CanvasControls() {
 
 function ViewMenu({
   isFullscreen,
+  workspaceGroups,
   onFullscreen,
   onClose,
 }: {
   isFullscreen: boolean;
+  workspaceGroups: ReturnType<typeof useApp.getState>['workspaceGroups'];
   onFullscreen: () => void;
   onClose: () => void;
 }) {
@@ -188,7 +195,7 @@ function ViewMenu({
   return (
     <div
       className={clsx(
-        'absolute bottom-full right-0 mb-2 w-56 rounded-lg py-1',
+        'absolute bottom-full right-0 mb-2 w-64 rounded-lg py-1',
         'border border-ink-200 dark:border-inkd-300',
         'bg-white/95 dark:bg-inkd-100/95 backdrop-blur shadow-xl',
       )}
@@ -197,7 +204,26 @@ function ViewMenu({
     >
       <MenuRow onClick={run(() => getView()?.resetZoom())} label="缩放至 100%" keys={['⌘', '0']} />
       <MenuRow onClick={run(() => getView()?.fit())} label="全览" keys={['Shift', '1']} />
-      <MenuRow onClick={run(() => getView()?.zoomToSelection())} label="缩放到选中" keys={['Shift', '2']} />
+      <MenuRow
+        onClick={run(() => getView()?.zoomToSelection())}
+        label="缩放到选中"
+        keys={['Shift', '2']}
+      />
+      {workspaceGroups.length > 1 && (
+        <>
+          <div className="my-1 h-px bg-ink-100 dark:bg-inkd-300" />
+          <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-ink-400 dark:text-inkd-500">
+            合并工作区
+          </div>
+          {workspaceGroups.map((group) => (
+            <MenuRow
+              key={group.id}
+              onClick={run(() => getView()?.fitNodes(group.nodeIds))}
+              label={`查看 ${group.label}`}
+            />
+          ))}
+        </>
+      )}
       <div className="my-1 h-px bg-ink-100 dark:bg-inkd-300" />
       <MenuRow onClick={run(() => relayoutCurrent())} label="重置布局" />
       <MenuRow onClick={run(onFullscreen)} label={isFullscreen ? '退出全屏' : '全屏'} />
@@ -205,7 +231,15 @@ function ViewMenu({
   );
 }
 
-function MenuRow({ onClick, label, keys }: { onClick: () => void; label: string; keys?: string[] }) {
+function MenuRow({
+  onClick,
+  label,
+  keys,
+}: {
+  onClick: () => void;
+  label: string;
+  keys?: string[];
+}) {
   return (
     <button
       type="button"
