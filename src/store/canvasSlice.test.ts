@@ -59,3 +59,15 @@ describe('setManualRoute rejects degenerate routes (finding 6)', () => {
     ]);
   });
 });
+
+describe('batch table widths', () => {
+  it('applies equal-width overrides atomically and ignores invalid values', () => {
+    useApp.setState({ tableWidths: { existing: 240 } });
+    useApp.getState().setTableWidths({ users: 321.6, orders: 321.6, invalid: Number.NaN });
+    expect(useApp.getState().tableWidths).toEqual({
+      existing: 240,
+      users: 322,
+      orders: 322,
+    });
+  });
+});

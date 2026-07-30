@@ -41,6 +41,7 @@ const DERIVED_OR_TRANSIENT_FIELDS = [
   'flashTables',
   'flashTick',
   'search',
+  'searchScope',
   // Search match navigation is derived from `search` + the live canvas; the
   // canvas repopulates it on load, so persisting it would only rehydrate a
   // stale counter.

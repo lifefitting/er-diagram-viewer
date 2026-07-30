@@ -134,8 +134,8 @@ export function CanvasControls() {
           <PillButton
             onClick={toggleCanvasMode}
             active={canvasMode === 'pan'}
-            title="抓手工具（拖拽平移）"
-            ariaLabel="抓手工具"
+            title={canvasMode === 'pan' ? '切换到编辑模式' : '切换到阅读模式（布局锁定）'}
+            ariaLabel={canvasMode === 'pan' ? '切换到编辑模式' : '切换到阅读模式'}
           >
             <HandIcon />
           </PillButton>
@@ -277,9 +277,12 @@ function HelpPopover() {
     >
       <div className="mb-2 text-[12px] font-semibold text-ink-800 dark:text-inkd-800">画布操作</div>
       <ul className="space-y-1.5">
-        <HelpRow keys="拖拽空白">框选表；框内无表时框选手动连线（选择模式）</HelpRow>
-        <HelpRow keys="抓手 / 空格 / 中键">拖拽平移画布</HelpRow>
+        <HelpRow keys="阅读模式">锁定表与连线，左键拖拽平移画布</HelpRow>
+        <HelpRow keys="编辑模式">框选、移动、连线、批注与批量操作</HelpRow>
+        <HelpRow keys="空格 / 中键">任意模式临时拖拽平移</HelpRow>
         <HelpRow keys="拖拽表头">移动卡片（多选时整组移动）</HelpRow>
+        <HelpRow keys="Alt + 拖拽">仅水平移动，不改变纵向位置</HelpRow>
+        <HelpRow keys="Shift + 拖拽">仅垂直精细移动；端口对齐时自动吸附</HelpRow>
         <HelpRow keys="⇧ / ⌘ 点击">加选 / 取消单张</HelpRow>
         <HelpRow keys="拖拽字段触点">悬停字段两侧圆点，拖线到目标字段建外键 / 逻辑关联</HelpRow>
         <HelpRow keys="点击字段">打开评审批注气泡（随评审报告导出）</HelpRow>

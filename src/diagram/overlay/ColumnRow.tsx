@@ -12,6 +12,7 @@ interface ColumnRowProps {
   showComment: boolean;
   isFk: boolean;
   query?: string;
+  commentQuery?: string;
   /** Mousedown on the row's connect dot: start a drag-to-connect manual
    *  relation from this column. `side` is which dot was grabbed — the rubber
    *  curve leaves the card horizontally on that side. Absent (pan mode) hides
@@ -42,6 +43,7 @@ export function ColumnRow({
   showComment,
   isFk,
   query = '',
+  commentQuery = '',
   onConnectStart,
   noteSeverity = null,
   onOpenNote,
@@ -167,7 +169,7 @@ export function ColumnRow({
           style={{ height: 14 }}
           title={col.comment}
         >
-          {highlightMatch(col.comment, query)}
+          {highlightMatch(col.comment, commentQuery)}
         </div>
       )}
     </div>
