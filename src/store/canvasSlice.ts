@@ -71,6 +71,15 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasState> = (s
       return { tableWidths: next };
     });
   },
+  setTableWidths(widths) {
+    set((s) => {
+      const next = { ...s.tableWidths };
+      for (const [tableName, width] of Object.entries(widths)) {
+        if (Number.isFinite(width) && width > 0) next[tableName] = Math.round(width);
+      }
+      return { tableWidths: next };
+    });
+  },
   resetTableWidths() {
     set({ tableWidths: {} });
   },

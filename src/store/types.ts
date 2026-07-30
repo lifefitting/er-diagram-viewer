@@ -6,6 +6,8 @@ import type { ModulesResult, PaletteName } from '../infer/inferModules';
  *  `prefers-color-scheme`. Resolved to a concrete light/dark value by the
  *  effect that toggles the `dark` class on `<html>`. */
 export type ThemePreference = 'light' | 'dark' | 'system';
+/** Search target selected in the top-left find control. */
+export type SearchScope = 'all' | 'table' | 'field';
 
 export interface DisplayOptions {
   onlyPk: boolean;
@@ -87,6 +89,7 @@ export interface DecisionsState {
 export interface DisplayState {
   display: DisplayOptions;
   search: string;
+  searchScope: SearchScope;
   /** Ordered cy node ids of the current search matches, in on-canvas reading
    *  order. Set by the canvas (which knows node positions); read by the toolbar
    *  for the "n / m" counter and by the canvas to center the active one.
@@ -104,6 +107,7 @@ export interface DisplayState {
    *  happens in the App-level effect that toggles the `.dark` class. */
   theme: ThemePreference;
   setSearch: (s: string) => void;
+  setSearchScope: (scope: SearchScope) => void;
   toggleDisplay: (k: keyof DisplayOptions) => void;
   setTheme: (t: ThemePreference) => void;
   /** Replace the ordered match list (canvas → store). Preserves the active
@@ -182,6 +186,8 @@ export interface CanvasState {
   collapseAll: () => void;
   expandAll: () => void;
   setTableWidth: (tableName: string, width: number | null) => void;
+  /** Apply several table width overrides atomically (multi-select 等宽). */
+  setTableWidths: (widths: Record<string, number>) => void;
   resetTableWidths: () => void;
   setNodePositions: (positions: Record<string, { x: number; y: number }>) => void;
   setViewport: (v: Viewport | null) => void;

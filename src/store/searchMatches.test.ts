@@ -8,7 +8,12 @@ import { useApp } from './index';
 // first-Enter-steps-stale-list bug (#2).
 describe('search match navigation store', () => {
   beforeEach(() => {
-    useApp.setState({ searchMatchIds: [], searchActiveIndex: -1, pendingSearchStep: null });
+    useApp.setState({
+      searchScope: 'all',
+      searchMatchIds: [],
+      searchActiveIndex: -1,
+      pendingSearchStep: null,
+    });
   });
 
   it('preserves the active match across a pure reorder', () => {
@@ -61,5 +66,16 @@ describe('search match navigation store', () => {
     s.requestSearchStep(1);
     s.setSearchMatches(['p', 'q']); // same list, but a step is pending
     expect(useApp.getState().searchActiveIndex).toBe(0);
+  });
+
+  it('resets navigation when the search scope changes', () => {
+    const s = useApp.getState();
+    s.setSearchMatches(['table-a', 'table-b']);
+    s.cycleSearchMatch(1);
+    s.requestSearchStep(1);
+    s.setSearchScope('field');
+    expect(useApp.getState().searchScope).toBe('field');
+    expect(useApp.getState().searchActiveIndex).toBe(-1);
+    expect(useApp.getState().pendingSearchStep).toBeNull();
   });
 });

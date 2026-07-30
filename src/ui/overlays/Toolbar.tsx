@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { useApp } from '../../store';
 import { ExportMenu } from './ExportMenu';
 import { MODULE_PALETTES, type PaletteName, type ModuleColor } from '../../infer/inferModules';
-import type { ThemePreference } from '../../store/types';
+import type { SearchScope, ThemePreference } from '../../store/types';
 import {
   BrandMark,
   ClearIcon,
@@ -42,14 +42,17 @@ export function Toolbar({ onOpenImport }: Props) {
   const tableCount = useApp((s) => s.schema?.tables.length ?? 0);
   const explicitFkCount = useApp((s) => s.schema?.explicitForeignKeys.length ?? 0);
   const inferredCount = useApp((s) => s.inferred.length);
+  const canvasMode = useApp((s) => s.canvasMode);
+  const setCanvasMode = useApp((s) => s.setCanvasMode);
   const hasSchema = tableCount > 0;
 
   return (
     <header
       className={clsx(
-        'h-11 flex items-center pl-3 pr-2 gap-2 border-b border-ink-100 dark:border-inkd-300',
-        'bg-white/95 dark:bg-inkd-100/95 backdrop-blur',
-        'supports-[backdrop-filter]:bg-white/80 supports-[backdrop-filter]:dark:bg-inkd-100/80',
+        'h-11 flex items-center pl-3 pr-2 gap-2 border-b backdrop-blur transition-colors',
+        canvasMode === 'pan'
+          ? 'border-sky-200 bg-sky-50/95 dark:border-sky-800/60 dark:bg-sky-950/20'
+          : 'border-amber-200 bg-amber-50/90 dark:border-amber-800/60 dark:bg-amber-950/15',
         'relative z-30',
       )}
     >
@@ -83,6 +86,10 @@ export function Toolbar({ onOpenImport }: Props) {
       <SearchInput value={search} onChange={setSearch} />
 
       <div className="flex-1" />
+
+      <ModeSwitcher mode={canvasMode} onChange={setCanvasMode} />
+
+      <Divider />
 
       {/* RIGHT: appearance tweaks (palette + theme) then I/O actions
           (import + export). Theme sits next to palette because both are
@@ -134,6 +141,8 @@ function SearchInput({ value, onChange }: { value: string; onChange: (v: string)
   const activeIndex = useApp((s) => s.searchActiveIndex);
   const cycle = useApp((s) => s.cycleSearchMatch);
   const requestStep = useApp((s) => s.requestSearchStep);
+  const scope = useApp((s) => s.searchScope);
+  const setScope = useApp((s) => s.setSearchScope);
 
   useEffect(() => {
     setLocal(value);
@@ -148,13 +157,24 @@ function SearchInput({ value, onChange }: { value: string; onChange: (v: string)
 
   return (
     <div className="flex items-center gap-1">
+      <select
+        aria-label="搜索范围"
+        className="h-8 rounded-md border border-ink-200 bg-white px-1.5 text-[11px] text-ink-600 outline-none hover:border-ink-300 focus:border-ink-400 dark:border-inkd-300 dark:bg-inkd-100 dark:text-inkd-700"
+        value={scope}
+        onChange={(event) => setScope(event.target.value as SearchScope)}
+        title="选择搜索范围"
+      >
+        <option value="all">全部</option>
+        <option value="table">表名</option>
+        <option value="field">字段</option>
+      </select>
       <div className="relative">
         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-400 dark:text-inkd-500 pointer-events-none">
           <SearchIcon />
         </span>
         <input
           className={clsx(
-            'h-8 w-48 pl-7 pr-7 text-xs rounded-md',
+            'h-8 w-44 pl-7 pr-7 text-xs rounded-md',
             'border border-ink-200 dark:border-inkd-300',
             'bg-white dark:bg-inkd-100',
             'text-ink-800 dark:text-inkd-800',
@@ -162,7 +182,9 @@ function SearchInput({ value, onChange }: { value: string; onChange: (v: string)
             'focus:ring-1 focus:ring-ink-200 dark:focus:ring-inkd-400',
             'placeholder:text-ink-300 dark:placeholder:text-inkd-500 transition',
           )}
-          placeholder="搜索表 / 列"
+          placeholder={
+            scope === 'table' ? '搜索表名' : scope === 'field' ? '搜索字段名' : '搜索全部'
+          }
           value={local}
           title="回车跳到下一个匹配 · Shift+回车 上一个"
           onChange={(e) => setLocal(e.target.value)}
@@ -223,6 +245,51 @@ function SearchInput({ value, onChange }: { value: string; onChange: (v: string)
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function ModeSwitcher({
+  mode,
+  onChange,
+}: {
+  mode: 'select' | 'pan';
+  onChange: (mode: 'select' | 'pan') => void;
+}) {
+  return (
+    <div
+      className="flex h-8 items-center rounded-md border border-ink-200 bg-white/80 p-0.5 shadow-sm dark:border-inkd-300 dark:bg-inkd-100/80"
+      role="group"
+      aria-label="工作模式"
+    >
+      <button
+        type="button"
+        className={clsx(
+          'h-6 rounded px-2 text-[11px] font-semibold transition-colors',
+          mode === 'pan'
+            ? 'bg-sky-600 text-white shadow-sm dark:bg-sky-500 dark:text-sky-950'
+            : 'text-ink-400 hover:text-ink-700 dark:text-inkd-500 dark:hover:text-inkd-800',
+        )}
+        onClick={() => onChange('pan')}
+        aria-pressed={mode === 'pan'}
+        title="阅读模式：锁定布局，拖拽平移画布"
+      >
+        ◉ 阅读
+      </button>
+      <button
+        type="button"
+        className={clsx(
+          'h-6 rounded px-2 text-[11px] font-semibold transition-colors',
+          mode === 'select'
+            ? 'bg-amber-500 text-amber-950 shadow-sm dark:bg-amber-400'
+            : 'text-ink-400 hover:text-ink-700 dark:text-inkd-500 dark:hover:text-inkd-800',
+        )}
+        onClick={() => onChange('select')}
+        aria-pressed={mode === 'select'}
+        title="编辑模式：框选、移动、连线和评审批注"
+      >
+        ✦ 编辑
+      </button>
     </div>
   );
 }

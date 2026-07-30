@@ -5,6 +5,9 @@ import {
   looksLikeArchive,
   ARCHIVE_FORMAT,
   ARCHIVE_VERSION,
+  encryptWorkspaceArchive,
+  decryptWorkspaceArchive,
+  isEncryptedWorkspaceArchive,
 } from './archive';
 import { PERSIST_VERSION } from '../store/persistMigrate';
 
@@ -89,6 +92,35 @@ describe('workspace archive round-trip', () => {
     expect('nodePositions' in parsed.state).toBe(false); // → slice default
     expect('palette' in parsed.state).toBe(false);
     expect(parsed.state.fieldNotes).toEqual(SNAPSHOT.fieldNotes); // siblings survive
+  });
+});
+
+describe('password-encrypted workspace archive', () => {
+  it('encrypts the complete archive and decrypts it with the correct password', async () => {
+    const plain = buildWorkspaceArchive(SNAPSHOT, OPTS);
+    const encrypted = await encryptWorkspaceArchive(plain, 'review-2026');
+    expect(isEncryptedWorkspaceArchive(encrypted)).toBe(true);
+    expect(encrypted).not.toContain(SNAPSHOT.rawSql);
+    expect(parseWorkspaceArchive(encrypted)).toEqual({
+      ok: false,
+      error: '该工作区存档已加密，请输入密码后导入',
+    });
+
+    const decrypted = await decryptWorkspaceArchive(encrypted, 'review-2026');
+    expect(decrypted.ok).toBe(true);
+    if (!decrypted.ok) return;
+    expect(parseWorkspaceArchive(decrypted.text)).toEqual(parseWorkspaceArchive(plain));
+  });
+
+  it('rejects a wrong password without exposing archive details', async () => {
+    const encrypted = await encryptWorkspaceArchive(
+      buildWorkspaceArchive(SNAPSHOT, OPTS),
+      'correct-password',
+    );
+    expect(await decryptWorkspaceArchive(encrypted, 'wrong-password')).toEqual({
+      ok: false,
+      error: '密码错误或存档已损坏',
+    });
   });
 });
 

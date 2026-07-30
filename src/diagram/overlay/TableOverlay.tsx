@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import type { DisplayOptions } from '../../store';
-import type { NoteSeverity } from '../../store/types';
+import type { NoteSeverity, SearchScope } from '../../store/types';
 import type { NodePos, OverlayState } from '../types';
 import { ColumnRow } from './ColumnRow';
 import { TableHeader } from './TableHeader';
@@ -27,6 +27,7 @@ interface TableOverlayProps {
   /** Active search query; matching substrings in name/comment/columns get a
    *  yellow find-highlight. */
   query?: string;
+  searchScope?: SearchScope;
   onDragHandle: (e: React.MouseEvent) => void;
   onResizeHandle: (e: React.MouseEvent) => void;
   onToggleCollapse: () => void;
@@ -62,6 +63,7 @@ export function TableOverlay({
   activeMatch = false,
   interactive = true,
   query = '',
+  searchScope = 'all',
   onDragHandle,
   onResizeHandle,
   onToggleCollapse,
@@ -72,6 +74,9 @@ export function TableOverlay({
   onOpenNote,
 }: TableOverlayProps) {
   const { table, x, y, w, h, moduleColor } = pos;
+  const tableNameQuery = searchScope === 'field' ? '' : query;
+  const fieldNameQuery = searchScope === 'table' ? '' : query;
+  const commentQuery = searchScope === 'all' ? query : '';
   // The active find-match gets the strongest ring + a glow so it stands out
   // among the other (amber) matches; otherwise amber focus/search match wins
   // over the sky multi-select ring. Dim opacity is independent, so a dimmed
@@ -118,7 +123,7 @@ export function TableOverlay({
         moduleKey={pos.moduleKey}
         moduleColor={moduleColor}
         collapsed={collapsed}
-        query={query}
+        query={tableNameQuery}
         onDragHandle={onDragHandle}
         onToggleCollapse={onToggleCollapse}
         onMarkDelete={onMarkDelete}
@@ -133,7 +138,7 @@ export function TableOverlay({
           style={{ height: 18 }}
           title={table.comment}
         >
-          {highlightMatch(table.comment, query)}
+          {highlightMatch(table.comment, commentQuery)}
         </div>
       )}
       {!collapsed && (
@@ -147,7 +152,8 @@ export function TableOverlay({
               showIndex={display.showIndex}
               showComment={display.showComment}
               isFk={fkColumns?.has(c.name) ?? false}
-              query={query}
+              query={fieldNameQuery}
+              commentQuery={commentQuery}
               onConnectStart={onConnectStart && ((side, e) => onConnectStart(c.name, side, e))}
               noteSeverity={noteColumns?.get(c.name) ?? null}
               onOpenNote={onOpenNote && ((e) => onOpenNote(c.name, e))}

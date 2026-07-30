@@ -6,10 +6,13 @@ import { SAMPLE_ECOMMERCE, SAMPLE_BLOG } from '../../samples';
 import {
   looksLikeArchive,
   parseWorkspaceArchive,
+  isEncryptedWorkspaceArchive,
+  decryptWorkspaceArchive,
   ARCHIVE_EXTENSION,
   type ParseArchiveResult,
 } from '../../exports/archive';
 import { mergeWorkspaceArchives, type MergeArchivesResult } from '../../exports/mergeArchives';
+import { ArchivePasswordDialog } from './ArchivePasswordDialog';
 
 interface Props {
   open: boolean;
@@ -29,6 +32,7 @@ interface StagedArchive {
   archive: LoadedArchive;
   fileName: string;
   size: number;
+  encrypted: boolean;
 }
 
 /** The dialog's two explicit entry modes（导入什么）. */
@@ -85,10 +89,40 @@ export function SqlInputDialog({ open, onClose }: Props) {
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unlockRequest, setUnlockRequest] = useState<{
+    content: string;
+    fileName: string;
+  } | null>(null);
+  const unlockResolverRef = useRef<((text: string | null) => void) | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const samplesMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const requestArchiveUnlock = useCallback((content: string, fileName: string) => {
+    return new Promise<string | null>((resolve) => {
+      unlockResolverRef.current?.(null);
+      unlockResolverRef.current = resolve;
+      setUnlockRequest({ content, fileName });
+    });
+  }, []);
+
+  const closeUnlockDialog = useCallback(() => {
+    unlockResolverRef.current?.(null);
+    unlockResolverRef.current = null;
+    setUnlockRequest(null);
+  }, []);
+
+  // A parent-level close/unmount can happen independently of the nested
+  // password dialog. Always settle its pending file-read promise so a later
+  // import never resumes against stale component state.
+  useEffect(() => {
+    if (!open) closeUnlockDialog();
+    return () => {
+      unlockResolverRef.current?.(null);
+      unlockResolverRef.current = null;
+    };
+  }, [open, closeUnlockDialog]);
 
   // Resync the editor with persisted SQL each time the dialog opens — the user
   // may have run a different setSql in between, and we don't want to discard
@@ -162,6 +196,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      if (unlockRequest) return; // the password dialog owns Escape / Enter
       if (e.key === 'Escape') {
         e.preventDefault();
         if (samplesOpen) setSamplesOpen(false);
@@ -175,7 +210,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose, submit, samplesOpen]);
+  }, [open, onClose, submit, samplesOpen, unlockRequest]);
 
   // Close samples dropdown on outside click.
   useEffect(() => {
@@ -197,11 +232,16 @@ export function SqlInputDialog({ open, onClose }: Props) {
       let sqlFile: { content: string; file: File } | null = null;
 
       for (const file of files) {
-        const content = await file.text();
+        const originalContent = await file.text();
+        const encrypted = isEncryptedWorkspaceArchive(originalContent);
+        const content = encrypted
+          ? await requestArchiveUnlock(originalContent, file.name)
+          : originalContent;
+        if (content === null) return;
         if (looksLikeArchive(content)) {
           const parsed = parseWorkspaceArchive(content);
           if (parsed.ok) {
-            archives.push({ archive: parsed, fileName: file.name, size: file.size });
+            archives.push({ archive: parsed, fileName: file.name, size: file.size, encrypted });
             continue;
           }
           if (file.name.endsWith(ARCHIVE_EXTENSION) || files.length > 1 || mode === 'archive') {
@@ -241,7 +281,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
         requestAnimationFrame(() => textareaRef.current?.focus());
       }
     },
-    [mode],
+    [mode, requestArchiveUnlock],
   );
 
   const onPickFile = useCallback(() => fileInputRef.current?.click(), []);
@@ -560,6 +600,21 @@ export function SqlInputDialog({ open, onClose }: Props) {
             </button>
           </div>
         </div>
+        {unlockRequest && (
+          <ArchivePasswordDialog
+            mode="decrypt"
+            fileName={unlockRequest.fileName}
+            onClose={closeUnlockDialog}
+            onConfirm={async (password) => {
+              const result = await decryptWorkspaceArchive(unlockRequest.content, password);
+              if (!result.ok) throw new Error(result.error);
+              const resolve = unlockResolverRef.current;
+              unlockResolverRef.current = null;
+              setUnlockRequest(null);
+              resolve?.(result.text);
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -594,8 +649,8 @@ function ArchivePanel({
             导入或合并工作区存档（{ARCHIVE_EXTENSION}）
           </div>
           <div className="text-[11.5px] leading-relaxed text-ink-400 dark:text-inkd-500">
-            可一次选择多个存档。合并时保留每个工作区的内部布局，
-            仅在区域重叠时整体平移，并提供一键查看入口。
+            支持密码加密存档与旧版未加密存档。可一次选择多个文件；合并时保留每个工作区的内部布局，
+            仅在区域重叠时整体平移。
           </div>
           <SecondaryButton onClick={onPickFile} icon={<UploadIcon />}>
             选择一个或多个存档
@@ -641,7 +696,7 @@ function ArchivePanel({
           ))}
 
         <div className="flex flex-col gap-2">
-          {staged.map(({ archive, fileName, size }) => {
+          {staged.map(({ archive, fileName, size, encrypted }) => {
             const st = archive.state;
             const metaRows: Array<[string, string]> = [
               ['表', String(archive.meta.tableCount || '?')],
@@ -665,6 +720,16 @@ function ArchivePanel({
                   <FileIcon />
                   <span className="font-mono font-medium truncate">{fileName}</span>
                   <span className="text-ink-400 dark:text-inkd-500">· {formatBytes(size)}</span>
+                  <span
+                    className={clsx(
+                      'rounded px-1.5 py-0.5 text-[9.5px] font-medium',
+                      encrypted
+                        ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
+                        : 'bg-ink-100 text-ink-500 dark:bg-inkd-200 dark:text-inkd-600',
+                    )}
+                  >
+                    {encrypted ? '已解密' : '兼容旧版'}
+                  </span>
                   <button
                     type="button"
                     className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[11px] text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:text-inkd-500 dark:hover:bg-inkd-200 dark:hover:text-inkd-800"

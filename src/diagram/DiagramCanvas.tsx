@@ -41,6 +41,8 @@ import {
 } from './routing/channelRoute';
 import { deriveFocusSelection, deriveSearchSelection } from './selection/deriveSelection';
 import { resolveDragGroup, toggleSelected } from './selection/dragGroup';
+import { constrainDragDelta, snapVerticalDelta } from './selection/constrainedDrag';
+import { arrangeSelection, type SelectionArrangement } from './selection/arrangeSelection';
 import {
   normalizeRect,
   nodesInMarquee,
@@ -157,6 +159,7 @@ export function DiagramCanvas() {
   const setFieldNote = useApp((s) => s.setFieldNote);
   const display = useApp((s) => s.display);
   const search = useApp((s) => s.search);
+  const searchScope = useApp((s) => s.searchScope);
   const modules = useApp((s) => s.modules);
   const collapsed = useApp((s) => s.collapsed);
   const tableWidths = useApp((s) => s.tableWidths);
@@ -165,6 +168,7 @@ export function DiagramCanvas() {
   const clearFlash = useApp((s) => s.clearFlash);
   const toggleCollapsed = useApp((s) => s.toggleCollapsed);
   const setTableWidth = useApp((s) => s.setTableWidth);
+  const setTableWidths = useApp((s) => s.setTableWidths);
   const canvasMode = useApp((s) => s.canvasMode);
   const deletedTables = useApp((s) => s.deletedTables);
   // NB: `manualRoutes` is intentionally NOT subscribed here — nothing in render
@@ -186,6 +190,12 @@ export function DiagramCanvas() {
   // together. Separate from `focusId` (which drives the FK-neighborhood
   // highlight) so additive selection never moves the camera or re-dims edges.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionArrangeMenu, setSelectionArrangeMenu] = useState<'align' | 'distribute' | null>(
+    null,
+  );
+  useEffect(() => {
+    if (selectedIds.size < 2) setSelectionArrangeMenu(null);
+  }, [selectedIds]);
   // Rubber-band selection box (viewport px) while the user drags on empty
   // canvas; null when no marquee is in progress.
   const [marquee, setMarquee] = useState<Rect | null>(null);
@@ -255,6 +265,95 @@ export function DiagramCanvas() {
       s.removeManualFk(fkKey.split('#')[0]);
     }
     setSelectedEdges(new Map());
+  };
+  const equalizeSelectedWidths = () => {
+    const cy = cyRef.current;
+    if (!cy || selectedIds.size < 2) return;
+    setSelectionArrangeMenu(null);
+    const nodes = [...selectedIds]
+      .map((id) => cy.getElementById(id))
+      .filter((node) => node && !node.empty());
+    if (nodes.length < 2) return;
+    const maxWidth = Math.max(...nodes.map((node) => (node.data('boxWidth') as number) ?? 0));
+    if (!Number.isFinite(maxWidth) || maxWidth <= 0) return;
+    const updates: Record<string, number> = {};
+    const fkKeys = new Set<string>();
+    for (const node of nodes) {
+      const table = tableByIdRef.current.get(node.id());
+      if (table) updates[table.name] = maxWidth;
+      node.connectedEdges().forEach((edge) => {
+        fkKeys.add(edge.data('fkKey') as string);
+      });
+    }
+    if (fkKeys.size > 0) useApp.getState().clearManualRoutesForNode([...fkKeys]);
+    setTableWidths(updates);
+    const nextWidths = { ...tableWidthsRef.current, ...updates };
+    if (!getIsApplying()) pushHistory(captureSnapshot(cy, nextWidths, manualMoveRef.current));
+    showConnectNotice(`已按最宽表统一 ${nodes.length} 张表的宽度`, 'ok');
+  };
+  const arrangeSelectedTables = (operation: SelectionArrangement) => {
+    const cy = cyRef.current;
+    if (!cy || selectedIds.size < 2) return;
+    const nodes = [...selectedIds]
+      .map((id) => cy.getElementById(id))
+      .filter((node) => node && !node.empty());
+    if (nodes.length < 2) return;
+    if (operation.startsWith('distribute-') && nodes.length < 3) {
+      showConnectNotice('均匀分布至少需要选择 3 张表', 'err');
+      return;
+    }
+    const arranged = arrangeSelection(
+      nodes.map((node) => {
+        const position = node.position();
+        return {
+          id: node.id(),
+          x: position.x,
+          y: position.y,
+          width: (node.data('boxWidth') as number) ?? 0,
+          height: (node.data('boxHeight') as number) ?? 0,
+        };
+      }),
+      operation,
+    );
+    const moved = nodes.filter((node) => {
+      const current = node.position();
+      const next = arranged[node.id()];
+      return next && (Math.abs(next.x - current.x) > 0.01 || Math.abs(next.y - current.y) > 0.01);
+    });
+    const label = SELECTION_ARRANGEMENT_LABELS[operation];
+    setSelectionArrangeMenu(null);
+    if (moved.length === 0) {
+      showConnectNotice(`所选表已满足${label}`, 'ok');
+      return;
+    }
+
+    const fkKeys = new Set<string>();
+    for (const node of moved) {
+      node.connectedEdges().forEach((edge) => {
+        const key = edge.data('fkKey') as string | undefined;
+        if (key) fkKeys.add(key);
+      });
+    }
+    if (fkKeys.size > 0) useApp.getState().clearManualRoutesForNode([...fkKeys]);
+    manualMoveRef.current = true;
+    cy.batch(() => {
+      for (const node of moved) node.position(arranged[node.id()]);
+    });
+    updateEdgeEndpoints(
+      cy,
+      cy.edges(),
+      collapsedRef.current,
+      tableByIdRef.current,
+      displayRef.current,
+      manualMoveRef.current,
+      useApp.getState().manualRoutes,
+    );
+    if (!getIsApplying()) {
+      const snapshot = captureSnapshot(cy, tableWidthsRef.current, manualMoveRef.current);
+      pushHistory(snapshot);
+      useApp.getState().setNodePositions(snapshot.positions);
+    }
+    showConnectNotice(`已完成${label}`, 'ok');
   };
   // Bumped during a segment drag to re-render the handles from the live route.
   const [, bumpRouteTick] = useState(0);
@@ -369,8 +468,8 @@ export function DiagramCanvas() {
   };
 
   const searchSelection = useMemo<Selection>(
-    () => deriveSearchSelection(schema, effectiveFks, search),
-    [schema, effectiveFks, search],
+    () => deriveSearchSelection(schema, effectiveFks, search, searchScope),
+    [schema, effectiveFks, search, searchScope],
   );
 
   const focusSelection = useMemo<Selection>(
@@ -1196,13 +1295,47 @@ export function DiagramCanvas() {
       .filter((n) => n && !n.empty())
       .map((n) => ({ node: n, start: { ...n.position() } }));
 
+    // Candidate group deltas that would align one moved field port exactly
+    // with a stationary peer. Internal group edges are excluded because both
+    // endpoints move together and their relative Y cannot change.
+    const movingIds = new Set(groupIds);
+    const straightSnapTargets: number[] = [];
+    for (const start of starts) {
+      start.node.connectedEdges().forEach((edge) => {
+        const sourceMoved = movingIds.has(edge.source().id());
+        const targetMoved = movingIds.has(edge.target().id());
+        if (sourceMoved === targetMoved) return;
+        const other = sourceMoved ? edge.target() : edge.source();
+        const movingWidth = (start.node.data('boxWidth') as number) ?? 0;
+        const otherWidth = (other.data('boxWidth') as number) ?? 0;
+        const horizontalGap =
+          Math.abs(start.start.x - other.position('x')) - (movingWidth + otherWidth) / 2;
+        if (horizontalGap < 0) return;
+        const points = routeToPoints(edge.data('routePoints') as string | undefined);
+        if (points.length < 2) return;
+        const movingEndpoint = sourceMoved ? points[0] : points[points.length - 1];
+        const fixedEndpoint = sourceMoved ? points[points.length - 1] : points[0];
+        straightSnapTargets.push(fixedEndpoint.y - movingEndpoint.y);
+      });
+    }
+
     const startMouse = { x: e.clientX, y: e.clientY };
     let moved = false;
+    let snapFeedbackShown = false;
     const onMove = (mv: MouseEvent) => {
       const zoom = cy.zoom();
-      const dx = (mv.clientX - startMouse.x) / zoom;
-      const dy = (mv.clientY - startMouse.y) / zoom;
-      if (!moved && Math.abs(dx) + Math.abs(dy) > 3) {
+      const screenDx = mv.clientX - startMouse.x;
+      const screenDy = mv.clientY - startMouse.y;
+      const constrained = constrainDragDelta(screenDx, screenDy, zoom, mv);
+      const dx = constrained.dx;
+      let dy = constrained.dy;
+      let snapped = false;
+      if (constrained.axis === 'vertical') {
+        const result = snapVerticalDelta(dy, straightSnapTargets, 7 / Math.max(zoom, 0.01));
+        dy = result.dy;
+        snapped = result.snapped;
+      }
+      if (!moved && Math.abs(screenDx) + Math.abs(screenDy) > 3) {
         moved = true;
         // First real movement → route edges live (detour from current ports)
         // for the rest of this session, until a relayout re-canonicalises.
@@ -1216,6 +1349,10 @@ export function DiagramCanvas() {
       cy.batch(() => {
         for (const s of starts) s.node.position({ x: s.start.x + dx, y: s.start.y + dy });
       });
+      if (snapped && !snapFeedbackShown) {
+        snapFeedbackShown = true;
+        showConnectNotice('✓ 连接端口已水平对齐，折线已拉直', 'ok');
+      }
     };
     const onUp = () => {
       nodeDraggingRef.current = false;
@@ -1796,6 +1933,7 @@ export function DiagramCanvas() {
             activeMatch={p.id === activeMatchId}
             interactive={canvasMode === 'select'}
             query={search}
+            searchScope={searchScope}
             onDragHandle={(e) => onTableDragStart(e, p.id)}
             onResizeHandle={(e) => onTableResize(e, p.table.name, p.id)}
             onToggleCollapse={() => toggleCollapsed(p.table.name)}
@@ -1937,6 +2075,17 @@ export function DiagramCanvas() {
           {connectNotice.text}
         </div>
       )}
+      <div
+        className={
+          'pointer-events-none absolute right-3 top-3 z-20 rounded-full border px-2.5 py-1 text-[10.5px] font-semibold shadow-sm backdrop-blur ' +
+          (canvasMode === 'pan'
+            ? 'border-sky-200 bg-sky-50/90 text-sky-700 dark:border-sky-700/60 dark:bg-sky-900/55 dark:text-sky-300'
+            : 'border-amber-200 bg-amber-50/90 text-amber-700 dark:border-amber-700/60 dark:bg-amber-900/50 dark:text-amber-300')
+        }
+        role="status"
+      >
+        {canvasMode === 'pan' ? '◉ 阅读模式 · 布局已锁定' : '✦ 编辑模式 · 可调整布局'}
+      </div>
       {noteEditor && (
         <FieldNoteBubble
           key={`${noteEditor.table}::${noteEditor.col}`}
@@ -1980,6 +2129,34 @@ export function DiagramCanvas() {
       {selectedIds.size >= 2 && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-ink-200 bg-white/90 px-3 py-1 text-[12px] font-medium text-ink-600 shadow-lg backdrop-blur dark:border-inkd-300 dark:bg-inkd-100/90 dark:text-inkd-700">
           <span>已选 {selectedIds.size} 张 · 拖动整组移动</span>
+          <button
+            type="button"
+            className="pointer-events-auto inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-sky-700 transition-colors hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-500/10"
+            title="以当前选中表中的最宽宽度统一全部表"
+            onClick={equalizeSelectedWidths}
+          >
+            ⇔ 等宽
+          </button>
+          <SelectionArrangeControl
+            label="对齐"
+            open={selectionArrangeMenu === 'align'}
+            options={ALIGN_OPTIONS}
+            onToggle={() =>
+              setSelectionArrangeMenu((current) => (current === 'align' ? null : 'align'))
+            }
+            onSelect={arrangeSelectedTables}
+          />
+          <SelectionArrangeControl
+            label="分布"
+            open={selectionArrangeMenu === 'distribute'}
+            options={DISTRIBUTE_OPTIONS}
+            disabled={selectedIds.size < 3}
+            disabledHint="均匀分布至少需要选择 3 张表"
+            onToggle={() =>
+              setSelectionArrangeMenu((current) => (current === 'distribute' ? null : 'distribute'))
+            }
+            onSelect={arrangeSelectedTables}
+          />
           <label className="pointer-events-auto inline-flex items-center gap-1">
             <span className="sr-only">批量修改所属模块</span>
             <select
@@ -2033,6 +2210,84 @@ export function DiagramCanvas() {
       {schema && schema.tables.length === 0 && Object.keys(deletedTables).length > 0 && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[13px] text-ink-400 dark:text-inkd-500">
           所有表均已标记建议删除 · 从左下角删除建议列表恢复
+        </div>
+      )}
+    </div>
+  );
+}
+
+const SELECTION_ARRANGEMENT_LABELS: Record<SelectionArrangement, string> = {
+  'align-left': '向左对齐',
+  'align-horizontal-center': '水平居中',
+  'align-right': '向右对齐',
+  'align-top': '顶部对齐',
+  'align-vertical-center': '垂直居中',
+  'align-bottom': '底部对齐',
+  'distribute-horizontal': '水平均匀分布',
+  'distribute-vertical': '垂直均匀分布',
+};
+
+const ALIGN_OPTIONS: ReadonlyArray<{ operation: SelectionArrangement; label: string }> = [
+  { operation: 'align-left', label: '向左对齐' },
+  { operation: 'align-horizontal-center', label: '水平居中' },
+  { operation: 'align-right', label: '向右对齐' },
+  { operation: 'align-top', label: '顶部对齐' },
+  { operation: 'align-vertical-center', label: '垂直居中' },
+  { operation: 'align-bottom', label: '底部对齐' },
+];
+
+const DISTRIBUTE_OPTIONS: ReadonlyArray<{ operation: SelectionArrangement; label: string }> = [
+  { operation: 'distribute-horizontal', label: '水平均匀分布' },
+  { operation: 'distribute-vertical', label: '垂直均匀分布' },
+];
+
+function SelectionArrangeControl({
+  label,
+  open,
+  options,
+  disabled = false,
+  disabledHint,
+  onToggle,
+  onSelect,
+}: {
+  label: string;
+  open: boolean;
+  options: ReadonlyArray<{ operation: SelectionArrangement; label: string }>;
+  disabled?: boolean;
+  disabledHint?: string;
+  onToggle: () => void;
+  onSelect: (operation: SelectionArrangement) => void;
+}) {
+  return (
+    <div className="pointer-events-auto relative">
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-sky-700 transition-colors hover:bg-sky-50 disabled:cursor-not-allowed disabled:text-ink-300 dark:text-sky-300 dark:hover:bg-sky-500/10 dark:disabled:text-inkd-500"
+        title={disabled ? disabledHint : `${label}选中的表`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={onToggle}
+      >
+        {label} <span className="text-[9px]">▴</span>
+      </button>
+      {open && (
+        <div
+          className={`absolute bottom-full left-1/2 z-30 mb-2 grid min-w-max -translate-x-1/2 gap-1 rounded-lg border border-ink-200 bg-white p-1.5 shadow-xl dark:border-inkd-300 dark:bg-inkd-100 ${options.length > 2 ? 'grid-cols-3' : 'grid-cols-1'}`}
+          role="menu"
+          aria-label={`${label}选中的表`}
+        >
+          {options.map((option) => (
+            <button
+              key={option.operation}
+              type="button"
+              role="menuitem"
+              className="rounded px-2 py-1.5 text-[11px] font-medium text-ink-600 transition-colors hover:bg-sky-50 hover:text-sky-700 dark:text-inkd-700 dark:hover:bg-sky-500/10 dark:hover:text-sky-300"
+              onClick={() => onSelect(option.operation)}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
       )}
     </div>

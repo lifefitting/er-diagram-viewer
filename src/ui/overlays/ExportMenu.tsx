@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp, effectiveForeignKeys, visibleSchema, getPersistedSnapshot } from '../../store';
-import { buildWorkspaceArchive, ARCHIVE_EXTENSION } from '../../exports/archive';
+import {
+  buildWorkspaceArchive,
+  encryptWorkspaceArchive,
+  ARCHIVE_EXTENSION,
+} from '../../exports/archive';
+import { ArchivePasswordDialog } from './ArchivePasswordDialog';
 import { version as appVersion } from '../../../package.json';
 import type { Core } from 'cytoscape';
 import { getCy } from '../../diagram/cyHandle';
@@ -29,7 +34,8 @@ function resolveExportTheme(pref: ThemePreference): ExportTheme {
 
 export function ExportMenu() {
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<null | 'png' | 'svg'>(null);
+  const [busy, setBusy] = useState<null | 'png' | 'svg' | 'archive'>(null);
+  const [archivePasswordOpen, setArchivePasswordOpen] = useState(false);
   // 评审报告 options sub-panel: whether to include the engine's candidate
   // lists (a reviewer may want a "facts + opinions only" report).
   const [reportOptsOpen, setReportOptsOpen] = useState(false);
@@ -196,24 +202,32 @@ export function ExportMenu() {
     setOpen(false);
   };
 
-  const exportArchive = () => {
+  const exportArchive = async (password: string) => {
     if (!rawSchema) return;
     // The archive is a WORKSPACE snapshot, not a view export: it includes the
     // full persisted state (recycle-binned tables, rejected candidates, layout,
     // camera), so opening it elsewhere reproduces this session exactly.
-    const json = buildWorkspaceArchive(
-      getPersistedSnapshot() as unknown as Record<string, unknown>,
-      {
-        appVersion,
-        exportedAt: new Date().toISOString(),
-        tableCount: rawSchema.tables.length,
-      },
-    );
-    download(
-      'data:application/json;charset=utf-8,' + encodeURIComponent(json),
-      `er-workspace-${ts()}${ARCHIVE_EXTENSION}`,
-    );
-    setOpen(false);
+    setBusy('archive');
+    try {
+      const json = buildWorkspaceArchive(
+        getPersistedSnapshot() as unknown as Record<string, unknown>,
+        {
+          appVersion,
+          exportedAt: new Date().toISOString(),
+          tableCount: rawSchema.tables.length,
+        },
+      );
+      const encrypted = await encryptWorkspaceArchive(json, password);
+      const url = URL.createObjectURL(
+        new Blob([encrypted], { type: 'application/json;charset=utf-8' }),
+      );
+      download(url, `er-workspace-${ts()}${ARCHIVE_EXTENSION}`);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setArchivePasswordOpen(false);
+      setOpen(false);
+    } finally {
+      setBusy(null);
+    }
   };
 
   const disabled = !schema;
@@ -305,10 +319,20 @@ export function ExportMenu() {
           <MenuItem
             icon={<ArchiveIcon />}
             label="工作区存档"
-            hint=".erreview"
-            onClick={exportArchive}
+            hint="密码加密"
+            onClick={() => {
+              setOpen(false);
+              setArchivePasswordOpen(true);
+            }}
           />
         </div>
+      )}
+      {archivePasswordOpen && (
+        <ArchivePasswordDialog
+          mode="encrypt"
+          onClose={() => setArchivePasswordOpen(false)}
+          onConfirm={exportArchive}
+        />
       )}
     </div>
   );

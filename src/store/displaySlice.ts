@@ -14,6 +14,7 @@ export const createDisplaySlice: StateCreator<AppState, [], [], DisplayState> = 
     showManualLinks: true,
   },
   search: '',
+  searchScope: 'all',
   searchMatchIds: [],
   searchActiveIndex: -1,
   pendingSearchStep: null,
@@ -24,6 +25,9 @@ export const createDisplaySlice: StateCreator<AppState, [], [], DisplayState> = 
     // A new query invalidates the match cursor; the canvas re-derives the match
     // list and pushes it back via setSearchMatches.
     set({ search: s, searchActiveIndex: -1 });
+  },
+  setSearchScope(searchScope) {
+    set({ searchScope, searchActiveIndex: -1, pendingSearchStep: null });
   },
   toggleDisplay(k) {
     set((s) => ({ display: { ...s.display, [k]: !s.display[k] } }));
