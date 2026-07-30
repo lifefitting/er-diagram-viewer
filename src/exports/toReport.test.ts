@@ -136,7 +136,14 @@ describe('buildReviewReport', () => {
       decisions: { [canonicalFkKey(fkCandidate)]: 'reject' },
       manualFks: [],
       tableDecisions: [
-        { table: 'payments', action: 'delete', updatedAt: '2026-07-11T01:00:00.000Z' },
+        {
+          table: 'payments',
+          action: 'delete',
+          // The report intentionally renders review times in the viewer's
+          // local timezone. Build the ISO instant from a local wall-clock time
+          // so this assertion is stable in both UTC CI and Asia/Shanghai.
+          updatedAt: new Date(2026, 6, 11, 9, 0).toISOString(),
+        },
       ],
       generatedAt: AT,
     });

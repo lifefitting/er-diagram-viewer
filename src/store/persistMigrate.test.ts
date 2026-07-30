@@ -8,6 +8,7 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
     theme: 'dark',
     sidebarCollapsed: true,
     decisions: { 'a.x->b.y': 'accept' },
+    moduleOverrides: { 't:a': 'api' },
     display: {
       onlyPk: false,
       showType: true,
@@ -69,6 +70,16 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
           ...valid,
           workspaceGroups: [{ ...valid.workspaceGroups[0], translation: { x: 'bad', y: 0 } }],
         }),
+    ).toBe(false);
+  });
+
+  it('keeps valid module overrides and drops malformed assignments', () => {
+    expect(sanitizePersisted(valid).moduleOverrides).toEqual({ 't:a': 'api' });
+    expect(
+      'moduleOverrides' in sanitizePersisted({ ...valid, moduleOverrides: { 't:a': '' } }),
+    ).toBe(false);
+    expect(
+      'moduleOverrides' in sanitizePersisted({ ...valid, moduleOverrides: { 't:a': 42 } }),
     ).toBe(false);
   });
 

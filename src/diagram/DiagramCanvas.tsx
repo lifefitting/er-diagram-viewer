@@ -278,6 +278,19 @@ export function DiagramCanvas() {
     return m;
   }, [schema]);
 
+  /** Current effective module shared by the selected tables. An empty value
+   *  means the selection spans multiple modules, which is exactly when the
+   *  batch picker is most useful. */
+  const selectedModuleKey = useMemo(() => {
+    const keys = new Set<string>();
+    for (const id of selectedIds) {
+      const table = tableById.get(id);
+      const key = table ? modules.byTable.get(table.name) : undefined;
+      if (key) keys.add(key);
+    }
+    return keys.size === 1 ? [...keys][0] : '';
+  }, [selectedIds, tableById, modules]);
+
   const effectiveFks = useMemo(
     () =>
       schema
@@ -1967,6 +1980,38 @@ export function DiagramCanvas() {
       {selectedIds.size >= 2 && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-ink-200 bg-white/90 px-3 py-1 text-[12px] font-medium text-ink-600 shadow-lg backdrop-blur dark:border-inkd-300 dark:bg-inkd-100/90 dark:text-inkd-700">
           <span>已选 {selectedIds.size} 张 · 拖动整组移动</span>
+          <label className="pointer-events-auto inline-flex items-center gap-1">
+            <span className="sr-only">批量修改所属模块</span>
+            <select
+              aria-label="批量修改所属模块"
+              className="max-w-[190px] rounded-full border border-ink-200 bg-white px-2 py-0.5 text-[11px] text-ink-700 outline-none transition-colors hover:border-ink-300 focus:border-blue-400 dark:border-inkd-300 dark:bg-inkd-100 dark:text-inkd-700"
+              value={selectedModuleKey}
+              onChange={(event) => {
+                const targetKey = event.target.value;
+                const restoreAuto = targetKey === '__auto__';
+                useApp
+                  .getState()
+                  .assignTablesToModule([...selectedIds], restoreAuto ? null : targetKey);
+                const target = modules.modules.get(targetKey);
+                showConnectNotice(
+                  restoreAuto
+                    ? `已恢复 ${selectedIds.size} 张表的自动分组`
+                    : `已将 ${selectedIds.size} 张表移到「${target?.label ?? targetKey}」`,
+                  'ok',
+                );
+              }}
+            >
+              <option value="" disabled>
+                多个模块 · 批量调整…
+              </option>
+              {modules.ordered.map((module) => (
+                <option key={module.name} value={module.name}>
+                  移到 {module.label}
+                </option>
+              ))}
+              <option value="__auto__">恢复自动分组</option>
+            </select>
+          </label>
           <button
             type="button"
             className="pointer-events-auto inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"

@@ -3,6 +3,7 @@ import { useApp } from '../../store';
 /** Module legend list. Section header lives in the parent AccordionSection. */
 export function ModulesPanel() {
   const modules = useApp((s) => s.modules);
+  const overrideCount = useApp((s) => Object.keys(s.moduleOverrides).length);
   const flashModule = useApp((s) => s.flashModule);
 
   if (modules.ordered.length === 0) {
@@ -61,12 +62,14 @@ export function ModulesPanel() {
           }
           title={
             '· 模块按表名前缀 + FK 邻接关系自动归类\n' +
+            '· Shift/⌘ 多选表后，可在画布底部批量修改所属模块或恢复自动分组\n' +
             '· 点击任意模块色块可在画布上平滑定位到该模块的所有表\n' +
             '· 顶部色板按钮可切换整套配色'
           }
         >
           <InfoIcon />
           <span>关于模块分组</span>
+          {overrideCount > 0 && <span>· 已人工调整 {overrideCount} 张</span>}
         </span>
       </div>
     </div>

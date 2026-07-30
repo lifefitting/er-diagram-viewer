@@ -31,6 +31,11 @@ export interface SchemaState {
    *  scan — logical-link inference runs ONLY for these. Persisted (a refresh
    *  re-derives the same candidates); cleared on a new import (`setSql`). */
   logicalKeys: string[];
+  /** Explicit table → module assignments made from the canvas multi-select
+   *  toolbar. Keys are stable cy node ids; values are inferred module keys.
+   *  The automatic inference remains the baseline and these persisted choices
+   *  are applied last, so a user decision always wins without rewriting DDL. */
+  moduleOverrides: Record<string, string>;
   /** Source workspaces retained by a multi-archive import. Each group owns the
    *  tables and logical-key scope from one archive, plus a camera bookmark for
    *  quick navigation. Empty for a normal SQL/single-archive workspace. */
@@ -45,6 +50,9 @@ export interface SchemaState {
   setPalette: (p: PaletteName) => void;
   /** Replace the picked business keys and re-derive inferred + modules. */
   setLogicalKeys: (keys: string[]) => void;
+  /** Move all selected tables into an existing module. Passing null removes
+   *  their explicit assignments and restores automatic grouping. */
+  assignTablesToModule: (nodeIds: string[], moduleKey: string | null) => void;
   /** Replace the whole workspace with a validated `.erreview` archive payload
    *  (see exports/archive.ts). Caller must pre-flight `parseSql` on the
    *  payload's rawSql — this action assumes it parses. */

@@ -131,6 +131,13 @@ export function sanitizePersisted(raw: unknown): Persisted {
     raw.logicalKeys.every((k) => typeof k === 'string' && k.length > 0)
   )
     out.logicalKeys = raw.logicalKeys;
+  if (
+    isRecord(raw.moduleOverrides) &&
+    Object.values(raw.moduleOverrides).every(
+      (moduleKey) => typeof moduleKey === 'string' && moduleKey.length > 0,
+    )
+  )
+    out.moduleOverrides = raw.moduleOverrides;
   if (isRecord(raw.fieldNotes)) {
     // Two generations of legacy shapes upgrade in place: plain-string values
     // (pre-timestamp) and {text, updatedAt} objects (pre-severity/status) —

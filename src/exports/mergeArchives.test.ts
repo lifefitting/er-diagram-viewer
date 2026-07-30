@@ -14,12 +14,14 @@ function workspaceArchive({
   logicalKeys,
   nodePositions,
   manualRoutes = {},
+  moduleOverrides = {},
 }: {
   rawSql: string;
   palette: PaletteName;
   logicalKeys: string[];
   nodePositions: Record<string, { x: number; y: number }>;
   manualRoutes?: Record<string, { x: number; y: number }[]>;
+  moduleOverrides?: Record<string, string>;
 }): LoadedArchive {
   const parsed = parseWorkspaceArchive(
     buildWorkspaceArchive(
@@ -29,6 +31,7 @@ function workspaceArchive({
         logicalKeys,
         nodePositions,
         manualRoutes,
+        moduleOverrides,
         viewport: { x: 10, y: 20, zoom: 2 },
       },
       {
@@ -149,6 +152,44 @@ describe('mergeWorkspaceArchives', () => {
     expect(
       logical.filter((fk) => owner.get(nodeId(fk.fromTable)) !== owner.get(nodeId(fk.toTable))),
     ).toHaveLength(0);
+  });
+
+  it('scopes and preserves explicit module assignments from each source archive', () => {
+    const commerceSql = [
+      'CREATE TABLE users (id INT PRIMARY KEY);',
+      'CREATE TABLE orders (id INT PRIMARY KEY);',
+    ].join('\n');
+    const automatic = runPipeline(commerceSql, 'professional').modules;
+    const target = automatic.byTable.get('orders')!;
+    const commerce = workspaceArchive({
+      rawSql: commerceSql,
+      palette: 'professional',
+      logicalKeys: [],
+      nodePositions: {
+        [nodeId('users')]: { x: 0, y: 0 },
+        [nodeId('orders')]: { x: 400, y: 0 },
+      },
+      moduleOverrides: { [nodeId('users')]: target },
+    });
+    const audit = tinyArchive('audit_logs', { x: 0, y: 1000 });
+    const result = mergeWorkspaceArchives([
+      { archive: commerce, fileName: 'commerce.erreview' },
+      { archive: audit, fileName: 'audit.erreview' },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const scopedTarget = `${result.state.workspaceGroups[0].id}:${target}`;
+    expect(result.state.moduleOverrides).toEqual({ [nodeId('users')]: scopedTarget });
+    const rebuilt = runPipeline(
+      result.state.rawSql,
+      result.state.palette ?? 'professional',
+      [],
+      result.state.workspaceGroups,
+      result.state.moduleOverrides,
+    );
+    expect(rebuilt.modules.byTable.get('users')).toBe(scopedTarget);
+    expect(rebuilt.modules.byTable.get('orders')).toBe(scopedTarget);
   });
 
   it('imports merged state into the store in one workspace replacement', () => {

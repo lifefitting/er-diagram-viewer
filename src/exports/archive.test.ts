@@ -25,6 +25,7 @@ const SNAPSHOT = {
     },
   ],
   logicalKeys: ['out_trade_no'],
+  moduleOverrides: { 't:a': 'account' },
   fieldNotes: {
     'a::id': {
       text: '建议改雪花 ID',

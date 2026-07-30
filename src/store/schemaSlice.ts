@@ -11,6 +11,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
   modules: EMPTY_MODULES,
   palette: DEFAULT_PALETTE,
   logicalKeys: [],
+  moduleOverrides: {},
   workspaceGroups: [],
   workspaceEpoch: 0,
   setSql(sql) {
@@ -28,6 +29,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       decisions: {},
       manualFks: [],
       logicalKeys: [],
+      moduleOverrides: {},
       workspaceGroups: [],
       fieldNotes: {},
       collapsed: {},
@@ -47,6 +49,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       get().palette,
       get().logicalKeys,
       get().workspaceGroups,
+      get().moduleOverrides,
     );
     set({ schema, inferred, modules });
   },
@@ -59,7 +62,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       return {
         palette: p,
         workspaceGroups,
-        modules: recomputeModules(s.schema, s.inferred, p, workspaceGroups),
+        modules: recomputeModules(s.schema, s.inferred, p, workspaceGroups, s.moduleOverrides),
       };
     });
   },
@@ -74,8 +77,28 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       get().palette,
       keys,
       get().workspaceGroups,
+      get().moduleOverrides,
     );
     set({ logicalKeys: keys, schema, inferred, modules });
+  },
+  assignTablesToModule(nodeIds, moduleKey) {
+    set((s) => {
+      const moduleOverrides = { ...s.moduleOverrides };
+      for (const id of nodeIds) {
+        if (moduleKey === null) delete moduleOverrides[id];
+        else moduleOverrides[id] = moduleKey;
+      }
+      return {
+        moduleOverrides,
+        modules: recomputeModules(
+          s.schema,
+          s.inferred,
+          s.palette,
+          s.workspaceGroups,
+          moduleOverrides,
+        ),
+      };
+    });
   },
   importWorkspace(archived) {
     // Replace-the-workspace semantics: every workspace field falls back to the
@@ -87,12 +110,14 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
     const { theme: _theme, sidebarCollapsed: _sidebar, ...rest } = archived;
     const palette = rest.palette ?? get().palette;
     const logicalKeys = rest.logicalKeys ?? [];
+    const moduleOverrides = rest.moduleOverrides ?? {};
     const workspaceGroups = rest.workspaceGroups ?? [];
     const { schema, inferred, modules } = runPipeline(
       rest.rawSql,
       palette,
       logicalKeys,
       workspaceGroups,
+      moduleOverrides,
     );
     set({
       // fresh-workspace baseline (mirrors setSql's reset list)
@@ -110,6 +135,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       ...rest,
       palette,
       logicalKeys,
+      moduleOverrides,
       workspaceGroups,
       schema,
       inferred,

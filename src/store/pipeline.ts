@@ -15,6 +15,7 @@ export function recomputeModules(
   inferred: InferredFK[],
   palette: PaletteName,
   workspaceGroups: readonly WorkspaceGroup[] = [],
+  moduleOverrides: Readonly<Record<string, string>> = {},
 ): ModulesResult {
   if (!schema) return EMPTY_MODULES;
   // Use explicit FKs plus inferred FKs of medium+ confidence so the topology
@@ -27,7 +28,9 @@ export function recomputeModules(
     ...schema.explicitForeignKeys,
     ...inferred.filter((f) => f.confidence !== 'low' && f.kind !== 'logical'),
   ];
-  if (workspaceGroups.length === 0) return inferModules(schema, fks, palette);
+  if (workspaceGroups.length === 0) {
+    return applyModuleOverrides(inferModules(schema, fks, palette), schema, moduleOverrides);
+  }
 
   // A merged workspace keeps module grouping and palette assignment inside
   // each source archive. Without this scope, similarly named tables from two
@@ -82,7 +85,47 @@ export function recomputeModules(
       'workspace',
     );
   }
-  return { byTable, modules, ordered };
+  return applyModuleOverrides({ byTable, modules, ordered }, schema, moduleOverrides);
+}
+
+/** Apply persisted, user-selected assignments over an inferred module graph.
+ *  Target modules come from the untouched baseline, so even a swap (all A → B
+ *  while some B → A) keeps both destinations available. Unknown/stale targets
+ *  are ignored safely and disappear when a new SQL import clears overrides. */
+export function applyModuleOverrides(
+  baseline: ModulesResult,
+  schema: Schema,
+  overrides: Readonly<Record<string, string>>,
+): ModulesResult {
+  const assignments = schema.tables.flatMap((table) => {
+    const targetKey = overrides[nodeId(table.name)];
+    return typeof targetKey === 'string' && baseline.modules.has(targetKey)
+      ? [{ table: table.name, targetKey }]
+      : [];
+  });
+  if (assignments.length === 0) return baseline;
+
+  const byTable = new Map(baseline.byTable);
+  const modules = new Map(
+    [...baseline.modules].map(([key, info]) => [key, { ...info, tables: [...info.tables] }]),
+  );
+
+  for (const { table, targetKey } of assignments) {
+    const sourceKey = byTable.get(table);
+    if (!sourceKey || sourceKey === targetKey) continue;
+    const source = modules.get(sourceKey);
+    const target = modules.get(targetKey);
+    if (!source || !target) continue;
+    source.tables = source.tables.filter((name) => name !== table);
+    if (!target.tables.includes(table)) target.tables.push(table);
+    byTable.set(table, targetKey);
+  }
+
+  const ordered = [...modules.values()]
+    .filter((info) => info.tables.length > 0)
+    .sort((a, b) => b.tables.length - a.tables.length || a.label.localeCompare(b.label));
+  const liveModules = new Map(ordered.map((info) => [info.name, info]));
+  return { byTable, modules: liveModules, ordered };
 }
 
 /** Slice a parsed schema by stable cy node ids while retaining only explicit
@@ -162,6 +205,7 @@ export function runPipeline(
   palette: PaletteName,
   logicalKeys: readonly string[] = [],
   workspaceGroups: readonly WorkspaceGroup[] = [],
+  moduleOverrides: Readonly<Record<string, string>> = {},
 ): { schema: Schema; inferred: InferredFK[]; modules: ModulesResult } {
   const rawSchema = parseSql(sql);
   const merged = mergeShardedTables(rawSchema).schema;
@@ -219,6 +263,6 @@ export function runPipeline(
   if (notices.length > 0) {
     schema = { ...merged, notices: [...(merged.notices ?? []), ...notices] };
   }
-  const modules = recomputeModules(schema, inferred, palette, workspaceGroups);
+  const modules = recomputeModules(schema, inferred, palette, workspaceGroups, moduleOverrides);
   return { schema, inferred, modules };
 }

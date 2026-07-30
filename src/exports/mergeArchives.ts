@@ -193,6 +193,7 @@ export function mergeWorkspaceArchives(
   const placed: Bounds[] = [];
   const nodePositions: Record<string, Point> = {};
   const manualRoutes: Record<string, Point[]> = {};
+  const moduleOverrides: Record<string, string> = {};
   const workspaceGroups: WorkspaceGroup[] = [];
 
   parsedSources.forEach((source, index) => {
@@ -223,8 +224,15 @@ export function mergeWorkspaceArchives(
     }
 
     const label = sourceLabel(source.fileName);
+    const groupId = sourceId(label, index);
+    // The merged pipeline scopes every inferred module key by workspace id.
+    // Carry explicit assignments through the same transformation so a user's
+    // corrected grouping survives archive merge as well as plain import.
+    for (const [id, targetKey] of Object.entries(source.archive.state.moduleOverrides ?? {})) {
+      if (idSet.has(id)) moduleOverrides[id] = `${groupId}:${targetKey}`;
+    }
     workspaceGroups.push({
-      id: sourceId(label, index),
+      id: groupId,
       label,
       sourceFile: source.fileName,
       nodeIds: ids,
@@ -291,6 +299,7 @@ export function mergeWorkspaceArchives(
     rawSql,
     palette,
     logicalKeys: [],
+    moduleOverrides,
     workspaceGroups,
     decisions,
     manualFks: [...manualByKey.values()],
@@ -306,7 +315,7 @@ export function mergeWorkspaceArchives(
 
   // Final pre-flight uses the exact scoped pipeline the imported store will
   // use, catching any concatenation/parser drift before current state changes.
-  const merged = runPipeline(rawSql, palette, [], workspaceGroups);
+  const merged = runPipeline(rawSql, palette, [], workspaceGroups, moduleOverrides);
   const expectedIds = new Set(workspaceGroups.flatMap((group) => group.nodeIds));
   const actualIds = new Set(merged.schema.tables.map((table) => nodeId(table.name)));
   if (expectedIds.size !== actualIds.size || [...expectedIds].some((id) => !actualIds.has(id))) {
