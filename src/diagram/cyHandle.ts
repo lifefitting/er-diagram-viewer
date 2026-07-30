@@ -35,6 +35,9 @@ export interface CyView {
   fit: () => void;
   resetZoom: () => void;
   zoomToSelection: () => void;
+  /** Fit a persisted workspace group's live nodes into view. Missing/recycled
+   *  nodes are ignored; no-op when none of the ids are currently visible. */
+  fitNodes: (ids: string[]) => void;
   /** Pan (keeping zoom) so the given node id is centered — used by search
    *  match navigation to follow the active hit. No-op if the node is gone. */
   centerOnNode: (id: string) => void;

@@ -11,6 +11,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
   modules: EMPTY_MODULES,
   palette: DEFAULT_PALETTE,
   logicalKeys: [],
+  moduleOverrides: {},
+  workspaceGroups: [],
   workspaceEpoch: 0,
   setSql(sql) {
     const { schema, inferred, modules } = runPipeline(sql, get().palette);
@@ -27,6 +29,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       decisions: {},
       manualFks: [],
       logicalKeys: [],
+      moduleOverrides: {},
+      workspaceGroups: [],
       fieldNotes: {},
       collapsed: {},
       tableWidths: {},
@@ -40,12 +44,27 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
   reparse() {
     const sql = get().rawSql;
     if (!sql) return;
-    const { schema, inferred, modules } = runPipeline(sql, get().palette, get().logicalKeys);
+    const { schema, inferred, modules } = runPipeline(
+      sql,
+      get().palette,
+      get().logicalKeys,
+      get().workspaceGroups,
+      get().moduleOverrides,
+    );
     set({ schema, inferred, modules });
   },
   setPalette(p) {
-    // Recolor modules in place; assignment is palette-independent so byTable stays valid.
-    set((s) => ({ palette: p, modules: recomputeModules(s.schema, s.inferred, p) }));
+    // A merged import initially keeps each source palette. Once the user picks
+    // a palette explicitly, apply it uniformly to every source group so the
+    // existing global palette control remains predictable.
+    set((s) => {
+      const workspaceGroups = s.workspaceGroups.map((group) => ({ ...group, palette: p }));
+      return {
+        palette: p,
+        workspaceGroups,
+        modules: recomputeModules(s.schema, s.inferred, p, workspaceGroups, s.moduleOverrides),
+      };
+    });
   },
   setLogicalKeys(keys) {
     const sql = get().rawSql;
@@ -53,8 +72,33 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
     // Re-run the pipeline with the new key set — logical candidates are pure
     // derivations of (rawSql, logicalKeys), so this both adds and removes
     // candidates correctly. Decisions keyed on surviving candidates persist.
-    const { schema, inferred, modules } = runPipeline(sql, get().palette, keys);
+    const { schema, inferred, modules } = runPipeline(
+      sql,
+      get().palette,
+      keys,
+      get().workspaceGroups,
+      get().moduleOverrides,
+    );
     set({ logicalKeys: keys, schema, inferred, modules });
+  },
+  assignTablesToModule(nodeIds, moduleKey) {
+    set((s) => {
+      const moduleOverrides = { ...s.moduleOverrides };
+      for (const id of nodeIds) {
+        if (moduleKey === null) delete moduleOverrides[id];
+        else moduleOverrides[id] = moduleKey;
+      }
+      return {
+        moduleOverrides,
+        modules: recomputeModules(
+          s.schema,
+          s.inferred,
+          s.palette,
+          s.workspaceGroups,
+          moduleOverrides,
+        ),
+      };
+    });
   },
   importWorkspace(archived) {
     // Replace-the-workspace semantics: every workspace field falls back to the
@@ -66,7 +110,15 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
     const { theme: _theme, sidebarCollapsed: _sidebar, ...rest } = archived;
     const palette = rest.palette ?? get().palette;
     const logicalKeys = rest.logicalKeys ?? [];
-    const { schema, inferred, modules } = runPipeline(rest.rawSql, palette, logicalKeys);
+    const moduleOverrides = rest.moduleOverrides ?? {};
+    const workspaceGroups = rest.workspaceGroups ?? [];
+    const { schema, inferred, modules } = runPipeline(
+      rest.rawSql,
+      palette,
+      logicalKeys,
+      workspaceGroups,
+      moduleOverrides,
+    );
     set({
       // fresh-workspace baseline (mirrors setSql's reset list)
       decisions: {},
@@ -83,6 +135,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       ...rest,
       palette,
       logicalKeys,
+      moduleOverrides,
+      workspaceGroups,
       schema,
       inferred,
       modules,

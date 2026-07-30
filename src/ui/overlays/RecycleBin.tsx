@@ -4,12 +4,12 @@ import { useApp } from '../../store';
 import { nodeId } from '../../diagram/nodeId';
 import { TrashIcon, RestoreIcon } from './icons';
 import { PILL } from './pill';
+import { formatNoteTime } from '../../store/notesSlice';
 
 /**
- * Recycle bin, bottom-left. Lists tables hidden from the diagram (via the
- * Delete key or the selection pill's trash) and restores them. The SQL is never
- * touched — this is a pure view filter (store.deletedTables); a restored table
- * returns to its saved position. Renders nothing while the bin is empty.
+ * Table-delete review list, bottom-left. A delete mark is both an auditable
+ * review decision and a canvas filter; cancelling it restores the table to its
+ * saved position. SQL is never touched. Hidden while there are no marks.
  */
 export function RecycleBin() {
   const deletedTables = useApp((s) => s.deletedTables);
@@ -53,11 +53,11 @@ export function RecycleBin() {
             'bg-white/95 dark:bg-inkd-100/95 backdrop-blur shadow-xl',
           )}
           role="menu"
-          aria-label="回收站"
+          aria-label="删除建议列表"
         >
           <div className="flex items-center justify-between px-2 py-1">
             <span className="text-[12px] font-semibold text-ink-800 dark:text-inkd-800">
-              回收站 · {count}
+              删除建议 · {count}
             </span>
             <button
               type="button"
@@ -67,7 +67,7 @@ export function RecycleBin() {
                 setOpen(false);
               }}
             >
-              全部恢复
+              全部取消
             </button>
           </div>
           <ul className="max-h-64 overflow-auto">
@@ -76,10 +76,17 @@ export function RecycleBin() {
                 <button
                   type="button"
                   className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[12.5px] text-ink-700 transition-colors hover:bg-ink-50 dark:text-inkd-700 dark:hover:bg-inkd-200"
-                  title={`恢复 ${nameOf(id)}`}
+                  title={`取消 ${nameOf(id)} 的删除标记`}
                   onClick={() => restoreTable(id)}
                 >
-                  <span className="truncate">{nameOf(id)}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate">{nameOf(id)}</span>
+                    <span className="block text-[10px] text-ink-400 dark:text-inkd-500">
+                      {deletedTables[id].updatedAt
+                        ? `标记于 ${formatNoteTime(deletedTables[id].updatedAt)}`
+                        : '标记时间未知'}
+                    </span>
+                  </span>
                   <span className="shrink-0 text-ink-400 dark:text-inkd-500">
                     <RestoreIcon />
                   </span>
@@ -94,8 +101,8 @@ export function RecycleBin() {
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-pressed={open}
-          title="回收站"
-          aria-label="回收站"
+          title="删除建议列表"
+          aria-label="删除建议列表"
           className={clsx(
             'inline-flex h-9 items-center gap-1.5 rounded-full px-2.5 transition-colors',
             open

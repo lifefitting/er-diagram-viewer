@@ -30,6 +30,8 @@ interface TableOverlayProps {
   onDragHandle: (e: React.MouseEvent) => void;
   onResizeHandle: (e: React.MouseEvent) => void;
   onToggleCollapse: () => void;
+  /** Mark this table 建议删除 (audited) and hide it from the canvas. */
+  onMarkDelete?: () => void;
   onResetWidth: () => void;
   /** Start a drag-to-connect manual relation from one of this table's columns
    *  (`side` = which connect dot was grabbed). */
@@ -63,6 +65,7 @@ export function TableOverlay({
   onDragHandle,
   onResizeHandle,
   onToggleCollapse,
+  onMarkDelete,
   onResetWidth,
   onConnectStart,
   noteColumns,
@@ -118,6 +121,7 @@ export function TableOverlay({
         query={query}
         onDragHandle={onDragHandle}
         onToggleCollapse={onToggleCollapse}
+        onMarkDelete={onMarkDelete}
       />
       {!collapsed && table.comment && table.comment.trim() && (
         <div

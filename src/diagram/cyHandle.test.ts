@@ -108,6 +108,7 @@ describe('cyHandle view binding notifications', () => {
     fit: () => {},
     resetZoom: () => {},
     zoomToSelection: () => {},
+    fitNodes: () => {},
     centerOnNode: () => {},
     getZoom: () => zoom,
     onZoomChange: () => () => {},

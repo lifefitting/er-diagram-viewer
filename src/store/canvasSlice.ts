@@ -113,7 +113,10 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasState> = (s
   deleteTables(ids) {
     set((s) => {
       const next = { ...s.deletedTables };
-      for (const id of ids) next[id] = true;
+      // One batch action receives one timestamp so the exported review record
+      // faithfully shows that the tables were marked together.
+      const updatedAt = new Date().toISOString();
+      for (const id of ids) next[id] = { action: 'delete', updatedAt };
       return { deletedTables: next };
     });
   },

@@ -25,6 +25,7 @@ const SNAPSHOT = {
     },
   ],
   logicalKeys: ['out_trade_no'],
+  moduleOverrides: { 't:a': 'account' },
   fieldNotes: {
     'a::id': {
       text: '建议改雪花 ID',
@@ -44,7 +45,9 @@ const SNAPSHOT = {
   },
   collapsed: { a: true },
   tableWidths: { a: 280 },
-  deletedTables: { 't:b': true },
+  deletedTables: {
+    't:b': { action: 'delete', updatedAt: '2026-07-12T07:30:00.000Z' },
+  },
   nodePositions: { 't:a': { x: 12, y: 34 } },
   manualRoutes: {
     'a.x->b.y': [

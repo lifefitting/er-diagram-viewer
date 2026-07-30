@@ -1,4 +1,4 @@
-import type { AppState } from './types';
+import type { AppState, WorkspaceGroup } from './types';
 
 /**
  * Persisted-state migration + shape validation for the `persist` middleware.
@@ -84,6 +84,27 @@ function isViewport(o: unknown): boolean {
   );
 }
 
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((item) => typeof item === 'string');
+}
+
+function isWorkspaceGroups(v: unknown): v is WorkspaceGroup[] {
+  if (!Array.isArray(v)) return false;
+  const ids = new Set<string>();
+  for (const item of v) {
+    if (!isRecord(item)) return false;
+    if (typeof item.id !== 'string' || item.id.length === 0 || ids.has(item.id)) return false;
+    if (typeof item.label !== 'string' || item.label.length === 0) return false;
+    if (typeof item.sourceFile !== 'string' || item.sourceFile.length === 0) return false;
+    if (!isStringArray(item.nodeIds) || !isStringArray(item.logicalKeys)) return false;
+    if (!PALETTES.has(item.palette as string)) return false;
+    if (item.viewport !== null && !isViewport(item.viewport)) return false;
+    if (!isPt(item.translation)) return false;
+    ids.add(item.id);
+  }
+  return true;
+}
+
 /**
  * Keep only the persisted fields that pass shape validation; drop the rest so
  * the store falls back to its slice defaults. Returns a fresh object safe to
@@ -110,6 +131,13 @@ export function sanitizePersisted(raw: unknown): Persisted {
     raw.logicalKeys.every((k) => typeof k === 'string' && k.length > 0)
   )
     out.logicalKeys = raw.logicalKeys;
+  if (
+    isRecord(raw.moduleOverrides) &&
+    Object.values(raw.moduleOverrides).every(
+      (moduleKey) => typeof moduleKey === 'string' && moduleKey.length > 0,
+    )
+  )
+    out.moduleOverrides = raw.moduleOverrides;
   if (isRecord(raw.fieldNotes)) {
     // Two generations of legacy shapes upgrade in place: plain-string values
     // (pre-timestamp) and {text, updatedAt} objects (pre-severity/status) —
@@ -160,11 +188,25 @@ export function sanitizePersisted(raw: unknown): Persisted {
     out.collapsed = raw.collapsed;
   if (isRecord(raw.tableWidths) && Object.values(raw.tableWidths).every(isFiniteNum))
     out.tableWidths = raw.tableWidths;
-  if (isRecord(raw.deletedTables) && Object.values(raw.deletedTables).every((v) => v === true))
-    out.deletedTables = raw.deletedTables;
+  if (isRecord(raw.deletedTables)) {
+    // Legacy snapshots stored `true`; retain the decision with an unknown time.
+    const decisions: Record<string, { action: 'delete'; updatedAt: string }> = {};
+    let valid = true;
+    for (const [key, value] of Object.entries(raw.deletedTables)) {
+      if (value === true) decisions[key] = { action: 'delete', updatedAt: '' };
+      else if (isRecord(value) && value.action === 'delete' && typeof value.updatedAt === 'string')
+        decisions[key] = { action: 'delete', updatedAt: value.updatedAt };
+      else {
+        valid = false;
+        break;
+      }
+    }
+    if (valid) out.deletedTables = decisions;
+  }
   if (isNodePositions(raw.nodePositions)) out.nodePositions = raw.nodePositions;
   if (isManualRoutes(raw.manualRoutes)) out.manualRoutes = raw.manualRoutes;
   if (raw.viewport === null || isViewport(raw.viewport)) out.viewport = raw.viewport;
+  if (isWorkspaceGroups(raw.workspaceGroups)) out.workspaceGroups = raw.workspaceGroups;
 
   return out as Persisted;
 }

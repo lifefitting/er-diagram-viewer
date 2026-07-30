@@ -8,6 +8,7 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
     theme: 'dark',
     sidebarCollapsed: true,
     decisions: { 'a.x->b.y': 'accept' },
+    moduleOverrides: { 't:a': 'api' },
     display: {
       onlyPk: false,
       showType: true,
@@ -19,7 +20,9 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
     },
     collapsed: { a: true },
     tableWidths: { a: 320 },
-    deletedTables: { 't:b': true },
+    deletedTables: {
+      't:b': { action: 'delete', updatedAt: '2026-07-29T12:00:00.000Z' },
+    },
     nodePositions: { 't:a': { x: 10, y: 20 } },
     manualRoutes: {
       'a.x->b.y': [
@@ -28,6 +31,18 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
       ],
     },
     viewport: { x: -100, y: 50, zoom: 1.5 },
+    workspaceGroups: [
+      {
+        id: 'api-1',
+        label: 'API',
+        sourceFile: 'api.erreview',
+        nodeIds: ['t:a'],
+        logicalKeys: ['appid'],
+        palette: 'professional',
+        viewport: { x: 1, y: 2, zoom: 1 },
+        translation: { x: 0, y: 0 },
+      },
+    ],
   };
 
   it('passes a fully valid payload through unchanged', () => {
@@ -45,6 +60,27 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
       false,
     );
     expect(sanitizePersisted({ ...valid, viewport: null }).viewport).toBeNull();
+  });
+
+  it('keeps valid workspace groups and drops malformed group metadata', () => {
+    expect(sanitizePersisted(valid).workspaceGroups).toEqual(valid.workspaceGroups);
+    expect(
+      'workspaceGroups' in
+        sanitizePersisted({
+          ...valid,
+          workspaceGroups: [{ ...valid.workspaceGroups[0], translation: { x: 'bad', y: 0 } }],
+        }),
+    ).toBe(false);
+  });
+
+  it('keeps valid module overrides and drops malformed assignments', () => {
+    expect(sanitizePersisted(valid).moduleOverrides).toEqual({ 't:a': 'api' });
+    expect(
+      'moduleOverrides' in sanitizePersisted({ ...valid, moduleOverrides: { 't:a': '' } }),
+    ).toBe(false);
+    expect(
+      'moduleOverrides' in sanitizePersisted({ ...valid, moduleOverrides: { 't:a': 42 } }),
+    ).toBe(false);
   });
 
   it('drops manualRoutes whose values are not point arrays', () => {
@@ -125,6 +161,20 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
     expect(
       'fieldNotes' in
         sanitizePersisted({ ...valid, fieldNotes: { k: { text: 'x', status: 'done' } } }),
+    ).toBe(false);
+  });
+
+  it('keeps timed table-delete decisions and upgrades legacy true flags', () => {
+    expect(sanitizePersisted(valid).deletedTables).toEqual(valid.deletedTables);
+    expect(sanitizePersisted({ ...valid, deletedTables: { 't:b': true } }).deletedTables).toEqual({
+      't:b': { action: 'delete', updatedAt: '' },
+    });
+    expect(
+      'deletedTables' in
+        sanitizePersisted({
+          ...valid,
+          deletedTables: { 't:b': { action: 'archive', updatedAt: '' } },
+        }),
     ).toBe(false);
   });
 

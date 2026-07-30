@@ -158,17 +158,18 @@ export function ExportMenu() {
 
   const exportReport = () => {
     if (!schema || !rawSchema) return;
-    // Recycle-bin'd tables by ORIGINAL name: deletedTables keys are node ids
-    // (`t:` + lowercased name), so reverse-map through the raw schema.
-    const deletedTableNames = rawSchema.tables
-      .map((t) => t.name)
-      .filter((name) => deletedTables[nodeId(name)]);
+    // Table-level delete decisions are keyed by node id; reverse-map to the
+    // original table names so the exported audit table stays human-readable.
+    const tableDecisions = rawSchema.tables.flatMap((table) => {
+      const decision = deletedTables[nodeId(table.name)];
+      return decision ? [{ table: table.name, ...decision }] : [];
+    });
     const md = buildReviewReport({
       schema,
       inferred,
       decisions,
       manualFks,
-      deletedTableNames,
+      tableDecisions,
       fieldNotes,
       include: {
         inferredFkCandidates: incFkCandidates,
