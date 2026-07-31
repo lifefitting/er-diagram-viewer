@@ -74,6 +74,7 @@ const PLACEHOLDER =
 
 export function SqlInputDialog({ open, onClose }: Props) {
   const setSql = useApp((s) => s.setSql);
+  const updateSql = useApp((s) => s.updateSql);
   const importWorkspace = useApp((s) => s.importWorkspace);
   const currentSql = useApp((s) => s.rawSql);
   const [text, setText] = useState(currentSql);
@@ -82,6 +83,9 @@ export function SqlInputDialog({ open, onClose }: Props) {
   // belongs to the SQL tab, `staged` to the archive tab — switching tabs
   // never clobbers the other side's work-in-progress.
   const [mode, setMode] = useState<ImportMode>('sql');
+  // Safe default for editing the SQL already loaded in the workspace. Users
+  // can explicitly turn it off when they really want a clean re-import.
+  const [preserveExisting, setPreserveExisting] = useState(true);
   // The archive tab accepts one archive (restore) or several (merge). Keeping
   // all parsed payloads staged lets us pre-flight the complete merge before a
   // single atomic store update touches the current workspace.
@@ -133,6 +137,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
       setLoadedFile(null);
       setStaged([]);
       setMode('sql');
+      setPreserveExisting(true);
       setSamplesOpen(false);
       setError(null);
     }
@@ -166,10 +171,9 @@ export function SqlInputDialog({ open, onClose }: Props) {
       return;
     }
     if (mode === 'sql' && !text.trim()) return;
-    // Pre-flight parse before committing: `setSql` / `importWorkspace`
-    // unconditionally replace decisions, layout and the recycle bin, so
-    // garbage input (or a parser throw) must not be allowed to wipe the
-    // current workspace.
+    // Pre-flight parse before committing: garbage input must never be allowed
+    // to alter the current workspace. SQL edits preserve surviving tables'
+    // layout/review state; archive imports deliberately replace everything.
     try {
       const sql = archive ? archive.state.rawSql : merged?.ok ? merged.state.rawSql : text;
       const parsed = parseSql(sql);
@@ -181,6 +185,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
       }
       if (merged?.ok) importWorkspace(merged.state);
       else if (archive) importWorkspace(archive.state);
+      else if (preserveExisting) updateSql(text);
       else setSql(text);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -188,7 +193,17 @@ export function SqlInputDialog({ open, onClose }: Props) {
       return;
     }
     onClose();
-  }, [setSql, importWorkspace, mergePreview, mode, staged, text, onClose]);
+  }, [
+    updateSql,
+    setSql,
+    importWorkspace,
+    mergePreview,
+    mode,
+    staged,
+    text,
+    preserveExisting,
+    onClose,
+  ]);
 
   // Keyboard shortcuts: Esc closes (or first closes the samples dropdown if
   // open), ⌘/Ctrl+Enter submits. Bound at window level so the textarea,
@@ -547,7 +562,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
         <div className="flex items-center justify-between px-5 py-3 border-t border-ink-100 dark:border-inkd-300 bg-ink-50/60 dark:bg-inkd-50/60 rounded-b-xl">
           <div className="flex items-center gap-3 text-[11px] text-ink-400 dark:text-inkd-500">
             {mode === 'sql' ? (
-              <>
+              <div className="flex items-center gap-3">
                 <span>
                   <span className="font-mono text-ink-600 dark:text-inkd-700">{stats.lines}</span>{' '}
                   行
@@ -559,7 +574,33 @@ export function SqlInputDialog({ open, onClose }: Props) {
                   </span>{' '}
                   字符
                 </span>
-              </>
+                {currentSql.trim() && (
+                  <>
+                    <span className="opacity-40">·</span>
+                    <label
+                      className={clsx(
+                        'inline-flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 transition-colors',
+                        preserveExisting
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/25 dark:text-emerald-300'
+                          : 'bg-amber-50 text-amber-700 dark:bg-amber-900/25 dark:text-amber-300',
+                      )}
+                      title={
+                        preserveExisting
+                          ? '保留已有表的位置、评审记录与当前视角；只放置新增表'
+                          : '清空当前布局与评审状态，对全部表重新自动布局'
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-emerald-600"
+                        checked={preserveExisting}
+                        onChange={(event) => setPreserveExisting(event.target.checked)}
+                      />
+                      {preserveExisting ? '保留布局与评审，新增表放到右侧' : '作为新工作区重新布局'}
+                    </label>
+                  </>
+                )}
+              </div>
             ) : (
               <span>
                 {staged.length > 1
@@ -592,10 +633,22 @@ export function SqlInputDialog({ open, onClose }: Props) {
                   ? staged.length > 1
                     ? '合并并导入存档 (⌘/Ctrl+Enter)'
                     : '导入存档，恢复评审现场 (⌘/Ctrl+Enter)'
-                  : '解析并绘制 (⌘/Ctrl+Enter)'
+                  : currentSql.trim()
+                    ? preserveExisting
+                      ? '更新图表并保留已有布局 (⌘/Ctrl+Enter)'
+                      : '作为新工作区重新导入 (⌘/Ctrl+Enter)'
+                    : '解析并绘制 (⌘/Ctrl+Enter)'
               }
             >
-              {mode === 'archive' ? (staged.length > 1 ? '合并并导入' : '导入存档') : '解析并绘制'}
+              {mode === 'archive'
+                ? staged.length > 1
+                  ? '合并并导入'
+                  : '导入存档'
+                : currentSql.trim()
+                  ? preserveExisting
+                    ? '更新图表'
+                    : '重新导入'
+                  : '解析并绘制'}
               <Kbd inverted={submittable}>⌘↵</Kbd>
             </button>
           </div>

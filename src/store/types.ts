@@ -47,7 +47,13 @@ export interface SchemaState {
    *  and discards stale in-session positions — i.e. the import replays the
    *  page-refresh restore path exactly. Transient (never persisted). */
   workspaceEpoch: number;
+  /** Replace the current workspace with unrelated SQL. Clears review/layout
+   *  state and lets the canvas run a complete automatic layout. */
   setSql: (sql: string) => void;
+  /** Apply an edit to the current SQL. Surviving tables retain layout and valid
+   *  review state; new tables are placed incrementally. Falls back to setSql
+   *  when the next schema has no table in common with the current one. */
+  updateSql: (sql: string) => void;
   reparse: () => void;
   setPalette: (p: PaletteName) => void;
   /** Replace the picked business keys and re-derive inferred + modules. */

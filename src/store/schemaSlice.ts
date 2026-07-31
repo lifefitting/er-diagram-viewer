@@ -2,6 +2,11 @@ import type { StateCreator } from 'zustand';
 import { DEFAULT_PALETTE } from '../infer/inferModules';
 import type { AppState, SchemaState } from './types';
 import { EMPTY_MODULES, recomputeModules, runPipeline } from './pipeline';
+import {
+  hasTableOverlap,
+  reconcileDerivationSettings,
+  reconcileWorkspaceState,
+} from './reconcileSqlUpdate';
 
 /** Schema, inferred FKs, modules. Owns the parse pipeline entry points. */
 export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (set, get) => ({
@@ -39,6 +44,43 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       deletedTables: {},
       viewport: null,
       flashTables: [],
+    });
+  },
+  updateSql(sql) {
+    const current = get();
+    // First derive the next table set. If it has no stable table in common
+    // with the current workspace, preserve setSql's explicit fresh-import
+    // semantics instead of carrying unrelated review data across schemas.
+    const draft = runPipeline(
+      sql,
+      current.palette,
+      current.logicalKeys,
+      current.workspaceGroups,
+      current.moduleOverrides,
+    );
+    if (!hasTableOverlap(current.schema, draft.schema)) {
+      current.setSql(sql);
+      return;
+    }
+
+    // Surviving tables keep their positions, review decisions and other user
+    // work. Removed tables/columns/edges are pruned, while newly added tables
+    // intentionally have no position so DiagramCanvas can place only them.
+    const settings = reconcileDerivationSettings(current, draft.schema);
+    const next = runPipeline(
+      sql,
+      current.palette,
+      settings.logicalKeys,
+      settings.workspaceGroups,
+      settings.moduleOverrides,
+    );
+    const preserved = reconcileWorkspaceState(current, next.schema, next.inferred, settings);
+    set({
+      rawSql: sql,
+      schema: next.schema,
+      inferred: next.inferred,
+      modules: next.modules,
+      ...preserved,
     });
   },
   reparse() {
