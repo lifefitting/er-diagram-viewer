@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
-import type { Core } from 'cytoscape';
-import { getCy, getView, onViewChange, relayoutCurrent, type CyView } from '../../diagram/cyHandle';
+import { getView, onViewChange, relayoutCurrent, type CyView } from '../../diagram/cyHandle';
 import { useApp } from '../../store';
 import { MinusIcon, PlusIcon, HelpIcon, HandIcon, UndoIcon, RedoIcon } from './icons';
 import { PILL } from './pill';
@@ -15,27 +14,6 @@ import { PILL } from './pill';
  * grey/highlight correctly; the imperative view + history actions go through the
  * `cyHandle` module so cytoscape stays out of the main bundle.
  */
-
-// Fixed zoom ladder so +/- snap to clean, predictable stops (the upper half
-// — 100/125/150/200/250/300/400 — is the sequence the design calls for; the
-// lower stops cover zoom-out). Pinch/⌘-wheel zoom stays continuous; only the
-// buttons snap.
-const ZOOM_STOPS = [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4];
-
-/** Step to the next ladder stop above (dir>0) or below (dir<0) the current zoom,
- *  keeping the viewport center fixed. Snaps an off-ladder zoom (e.g. a pinch to
- *  144%) onto the ladder in the chosen direction. */
-function zoomStep(dir: 1 | -1): void {
-  const cy = getCy<Core>();
-  if (!cy) return;
-  const z = cy.zoom();
-  const eps = 0.001;
-  const next =
-    dir > 0
-      ? (ZOOM_STOPS.find((s) => s > z + eps) ?? ZOOM_STOPS[ZOOM_STOPS.length - 1])
-      : ([...ZOOM_STOPS].reverse().find((s) => s < z - eps) ?? ZOOM_STOPS[0]);
-  cy.zoom({ level: next, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
-}
 
 export function CanvasControls() {
   const canvasMode = useApp((s) => s.canvasMode);
@@ -140,7 +118,7 @@ export function CanvasControls() {
             <HandIcon />
           </PillButton>
           <PillDivider />
-          <PillButton onClick={() => zoomStep(-1)} title="缩小" ariaLabel="缩小">
+          <PillButton onClick={() => getView()?.zoomStep(-1)} title="缩小" ariaLabel="缩小">
             <MinusIcon />
           </PillButton>
           <button
@@ -153,7 +131,7 @@ export function CanvasControls() {
           >
             {zoomPct}%
           </button>
-          <PillButton onClick={() => zoomStep(1)} title="放大" ariaLabel="放大">
+          <PillButton onClick={() => getView()?.zoomStep(1)} title="放大" ariaLabel="放大">
             <PlusIcon />
           </PillButton>
         </div>
@@ -287,6 +265,7 @@ function HelpPopover() {
         <HelpRow keys="拖拽字段触点">悬停字段两侧圆点，拖线到目标字段建外键 / 逻辑关联</HelpRow>
         <HelpRow keys="点击字段">打开评审批注气泡（随评审报告导出）</HelpRow>
         <HelpRow keys="滚轮 / 双指">平移 · 捏合或 ⌘ 滚轮缩放</HelpRow>
+        <HelpRow keys="画布右键">缩放、全览与显示 / 隐藏网格</HelpRow>
         <HelpRow keys="⌘Z / ⌘⇧Z">撤销 / 重做</HelpRow>
         <HelpRow keys="Esc">取消选择</HelpRow>
       </ul>

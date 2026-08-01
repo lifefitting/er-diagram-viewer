@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { Toolbar } from './ui/overlays/Toolbar';
 import { CanvasControls } from './ui/overlays/CanvasControls';
 import { RecycleBin } from './ui/overlays/RecycleBin';
@@ -9,6 +9,7 @@ import { useApp } from './store';
 import { SAMPLE_ECOMMERCE } from './samples';
 import { useApplyTheme } from './ui/theme/useApplyTheme';
 import { ErrorBoundary } from './ui/ErrorBoundary';
+import { CanvasContextMenu, type CanvasContextMenuPosition } from './ui/overlays/CanvasContextMenu';
 
 // Lazy-load the diagram canvas. Pulling cytoscape (≈250 KB minified) only
 // when there's actually a schema to render lets the first paint complete
@@ -21,10 +22,14 @@ const DiagramCanvas = lazy(() => import('./diagram/DiagramCanvas'));
 export default function App() {
   useApplyTheme();
   const [importOpen, setImportOpen] = useState(false);
+  const [canvasContextMenu, setCanvasContextMenu] = useState<CanvasContextMenuPosition | null>(
+    null,
+  );
   const schema = useApp((s) => s.schema);
   const sidebarCollapsed = useApp((s) => s.sidebarCollapsed);
   const setSql = useApp((s) => s.setSql);
   const workspaceEpoch = useApp((s) => s.workspaceEpoch);
+  const closeCanvasContextMenu = useCallback(() => setCanvasContextMenu(null), []);
 
   useEffect(() => {
     // Three startup paths, in priority order:
@@ -72,7 +77,22 @@ export default function App() {
       {/* The canvas region clips overflow so dragged table cards cannot bleed
           out past the canvas edges (under the toolbar or behind the sidebar). */}
       <div className="flex-1 relative min-h-0 overflow-hidden">
-        <main className="absolute inset-0">
+        <main
+          data-testid="canvas-region"
+          className="absolute inset-0"
+          onContextMenu={(event) => {
+            if (!schema || schema.tables.length === 0) return;
+            const target = event.target;
+            if (
+              target instanceof Element &&
+              target.closest('input, textarea, select, [contenteditable="true"]')
+            ) {
+              return;
+            }
+            event.preventDefault();
+            setCanvasContextMenu({ x: event.clientX, y: event.clientY });
+          }}
+        >
           {schema && schema.tables.length > 0 ? (
             <ErrorBoundary>
               <Suspense fallback={<CanvasLoading />}>
@@ -87,6 +107,9 @@ export default function App() {
             <div className="h-full flex items-center justify-center text-ink-400 dark:text-inkd-500 text-sm">
               点击「导入 SQL」开始
             </div>
+          )}
+          {canvasContextMenu && (
+            <CanvasContextMenu position={canvasContextMenu} onClose={closeCanvasContextMenu} />
           )}
         </main>
         {schema && schema.tables.length > 0 && <CanvasControls />}

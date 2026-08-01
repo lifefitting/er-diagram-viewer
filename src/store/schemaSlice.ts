@@ -2,6 +2,12 @@ import type { StateCreator } from 'zustand';
 import { DEFAULT_PALETTE } from '../infer/inferModules';
 import type { AppState, SchemaState } from './types';
 import { EMPTY_MODULES, recomputeModules, runPipeline } from './pipeline';
+import {
+  hasTableOverlap,
+  reconcileDerivationSettings,
+  reconcileWorkspaceState,
+} from './reconcileSqlUpdate';
+import { applyColumnOrders, reconcileColumnOrders } from './columnOrder';
 
 /** Schema, inferred FKs, modules. Owns the parse pipeline entry points. */
 export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (set, get) => ({
@@ -34,11 +40,49 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       fieldNotes: {},
       collapsed: {},
       tableWidths: {},
+      columnOrders: {},
       nodePositions: {},
       manualRoutes: {},
       deletedTables: {},
       viewport: null,
       flashTables: [],
+    });
+  },
+  updateSql(sql) {
+    const current = get();
+    // First derive the next table set. If it has no stable table in common
+    // with the current workspace, preserve setSql's explicit fresh-import
+    // semantics instead of carrying unrelated review data across schemas.
+    const draft = runPipeline(
+      sql,
+      current.palette,
+      current.logicalKeys,
+      current.workspaceGroups,
+      current.moduleOverrides,
+    );
+    if (!hasTableOverlap(current.schema, draft.schema)) {
+      current.setSql(sql);
+      return;
+    }
+
+    // Surviving tables keep their positions, review decisions and other user
+    // work. Removed tables/columns/edges are pruned, while newly added tables
+    // intentionally have no position so DiagramCanvas can place only them.
+    const settings = reconcileDerivationSettings(current, draft.schema);
+    const next = runPipeline(
+      sql,
+      current.palette,
+      settings.logicalKeys,
+      settings.workspaceGroups,
+      settings.moduleOverrides,
+    );
+    const preserved = reconcileWorkspaceState(current, next.schema, next.inferred, settings);
+    set({
+      rawSql: sql,
+      schema: applyColumnOrders(next.schema, preserved.columnOrders),
+      inferred: next.inferred,
+      modules: next.modules,
+      ...preserved,
     });
   },
   reparse() {
@@ -51,7 +95,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       get().workspaceGroups,
       get().moduleOverrides,
     );
-    set({ schema, inferred, modules });
+    const columnOrders = reconcileColumnOrders(get().columnOrders, schema);
+    set({ schema: applyColumnOrders(schema, columnOrders), inferred, modules, columnOrders });
   },
   setPalette(p) {
     // A merged import initially keeps each source palette. Once the user picks
@@ -79,7 +124,14 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       get().workspaceGroups,
       get().moduleOverrides,
     );
-    set({ logicalKeys: keys, schema, inferred, modules });
+    const columnOrders = reconcileColumnOrders(get().columnOrders, schema);
+    set({
+      logicalKeys: keys,
+      schema: applyColumnOrders(schema, columnOrders),
+      inferred,
+      modules,
+      columnOrders,
+    });
   },
   assignTablesToModule(nodeIds, moduleKey) {
     set((s) => {
@@ -119,6 +171,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       workspaceGroups,
       moduleOverrides,
     );
+    const columnOrders = reconcileColumnOrders(rest.columnOrders ?? {}, schema);
     set({
       // fresh-workspace baseline (mirrors setSql's reset list)
       decisions: {},
@@ -137,7 +190,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       logicalKeys,
       moduleOverrides,
       workspaceGroups,
-      schema,
+      columnOrders,
+      schema: applyColumnOrders(schema, columnOrders),
       inferred,
       modules,
       // Remount the canvas: replays the refresh-restore path (positions +

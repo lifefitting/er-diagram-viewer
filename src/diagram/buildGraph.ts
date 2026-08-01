@@ -73,6 +73,7 @@ export const DRAG_MAX_WIDTH = 1200;
 const HEADER_PADDING = 16; // chevron + gaps + right padding
 const ROW_HPADDING = 28; // total horizontal padding around field row content
 const BADGE_COL_WIDTH = 38; // PK / FK / PK+FK badge column
+const REORDER_HANDLE_SPACE = 22; // 14px grip + the surrounding flex gap
 const TYPE_GAP = 12; // gap between field name and type
 const COMMENT_HPADDING = 24; // padding around comment line
 
@@ -181,7 +182,12 @@ export function tableBoxSize(
     if (!isVisibleColumn(col, table, display)) continue;
     const nameW = measureText(col.name, 12);
     const typeW = display.showType ? measureText(shortType(col.rawType), 10.5) : 0;
-    const rowW = BADGE_COL_WIDTH + nameW + (typeW ? TYPE_GAP + typeW : 0) + ROW_HPADDING;
+    const rowW =
+      BADGE_COL_WIDTH +
+      REORDER_HANDLE_SPACE +
+      nameW +
+      (typeW ? TYPE_GAP + typeW : 0) +
+      ROW_HPADDING;
     if (rowW > rowsWidth) rowsWidth = rowW;
     if (display.showComment && col.comment) {
       const cw = measureText(col.comment, 10.5) + COMMENT_HPADDING;

@@ -34,6 +34,8 @@ export interface CyView {
   relayout: () => void;
   fit: () => void;
   resetZoom: () => void;
+  /** Move to the next fixed zoom stop while keeping the viewport center fixed. */
+  zoomStep: (direction: 1 | -1) => void;
   zoomToSelection: () => void;
   /** Fit a persisted workspace group's live nodes into view. Missing/recycled
    *  nodes are ignored; no-op when none of the ids are currently visible. */

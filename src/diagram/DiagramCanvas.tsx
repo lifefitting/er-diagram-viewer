@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import cytoscape, { type Core, type EdgeCollection, type EdgeSingular } from 'cytoscape';
 import {
   buildElements,
@@ -30,6 +30,7 @@ import type { NodePos, OverlayState, Selection } from './types';
 import { TableOverlay } from './overlay/TableOverlay';
 import { RouteHandles } from './overlay/RouteHandles';
 import { runLayout } from './layout/runLayout';
+import { placeIncrementalNodes } from './layout/incrementalLayout';
 import { clampPanAxis } from './clampPan';
 import { updateEdgeEndpoints } from './routing/updateEdgeEndpoints';
 import {
@@ -51,6 +52,7 @@ import {
 } from './selection/marquee';
 import { TrashIcon } from '../ui/overlays/icons';
 import { useResolvedTheme } from '../ui/theme/useApplyTheme';
+import { nextZoomStop } from './zoom';
 
 /**
  * On the dark canvas, dark palette edge colors (mono, earth, darker vibrant)
@@ -169,6 +171,7 @@ export function DiagramCanvas() {
   const toggleCollapsed = useApp((s) => s.toggleCollapsed);
   const setTableWidth = useApp((s) => s.setTableWidth);
   const setTableWidths = useApp((s) => s.setTableWidths);
+  const setColumnOrder = useApp((s) => s.setColumnOrder);
   const canvasMode = useApp((s) => s.canvasMode);
   const deletedTables = useApp((s) => s.deletedTables);
   // NB: `manualRoutes` is intentionally NOT subscribed here — nothing in render
@@ -233,6 +236,14 @@ export function DiagramCanvas() {
     null,
   );
   const connectNoticeTimer = useRef<number | null>(null);
+  const showConnectNotice = useCallback((text: string, tone: 'ok' | 'err') => {
+    if (connectNoticeTimer.current !== null) clearTimeout(connectNoticeTimer.current);
+    setConnectNotice({ text, tone });
+    connectNoticeTimer.current = window.setTimeout(() => {
+      connectNoticeTimer.current = null;
+      setConnectNotice(null);
+    }, 2400);
+  }, []);
   // Field-note bubble (评审批注): opened by clicking a field row; anchored
   // below the row, container-relative. Null when closed.
   const [noteEditor, setNoteEditor] = useState<null | {
@@ -596,7 +607,7 @@ export function DiagramCanvas() {
       style: buildStylesheet(),
       wheelSensitivity: 0.2,
       minZoom: 0.15,
-      maxZoom: 4,
+      maxZoom: 1,
       boxSelectionEnabled: false,
       // Empty-canvas drag is reserved for marquee selection (handled by our own
       // mousedown below), so cytoscape's drag-to-pan is off. Wheel input is
@@ -637,6 +648,11 @@ export function DiagramCanvas() {
     const fitImpl = () => cy.fit(undefined, 60);
     const resetZoomImpl = () =>
       cy.zoom({ level: 1, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+    const zoomStepImpl = (direction: 1 | -1) =>
+      cy.zoom({
+        level: nextZoomStop(cy.zoom(), direction),
+        renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
+      });
     const zoomToSelectionImpl = () => {
       const ids = selectedIdsRef.current;
       if (ids.size === 0) return; // no-op when nothing is multi-selected
@@ -710,6 +726,7 @@ export function DiagramCanvas() {
       relayout,
       fit: fitImpl,
       resetZoom: resetZoomImpl,
+      zoomStep: zoomStepImpl,
       zoomToSelection: zoomToSelectionImpl,
       fitNodes: fitNodesImpl,
       centerOnNode: centerOnNodeImpl,
@@ -1077,10 +1094,44 @@ export function DiagramCanvas() {
       // channels baked on its edges).
       manualMoveRef.current = true;
       if (newlyAdded.length > 0) {
-        // Place new tables off to the right; user can reorganize.
-        const maxX = Math.max(0, ...cy.nodes().map((n) => n.position('x')));
-        newlyAdded.forEach((n, i) => n.position({ x: maxX + 220, y: 80 + i * 120 }));
+        // Keep every restored card pinned. Only additions are packed into a
+        // collision-free column to the right, vertically near related tables.
+        const addedIds = new Set(newlyAdded.map((node) => node.id()));
+        const fixedNodes: Array<{
+          id: string;
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+        }> = [];
+        cy.nodes().forEach((node) => {
+          if (addedIds.has(node.id())) return;
+          fixedNodes.push({
+            id: node.id(),
+            x: node.position('x'),
+            y: node.position('y'),
+            width: (node.data('boxWidth') as number) ?? 240,
+            height: (node.data('boxHeight') as number) ?? 80,
+          });
+        });
+        const placements = placeIncrementalNodes(
+          fixedNodes,
+          newlyAdded.map((node) => ({
+            id: node.id(),
+            width: (node.data('boxWidth') as number) ?? 240,
+            height: (node.data('boxHeight') as number) ?? 80,
+            neighborIds: node
+              .connectedEdges()
+              .connectedNodes()
+              .map((neighbor) => neighbor.id())
+              .filter((id) => id !== node.id()),
+          })),
+        );
+        cy.batch(() => {
+          newlyAdded.forEach((node) => node.position(placements[node.id()]));
+        });
         persistLayout(cy);
+        showConnectNotice(`已保留现有布局，${newlyAdded.length} 张新增表已放到右侧`, 'ok');
       }
     }
     // One-shot camera restore: only on the first build after a (re)mount. On a
@@ -1141,7 +1192,7 @@ export function DiagramCanvas() {
     // via direct cy mutation in `onTableResize` to avoid a full element
     // rebuild (which would reset edge classes/positions). The next schema
     // change picks up the persisted overrides from the store.
-  }, [schema, effectiveFks, modules]);
+  }, [schema, effectiveFks, modules, showConnectNotice]);
 
   // Resize every node when collapsed / display options / width overrides
   // change. Position is preserved; we just push new boxWidth/boxHeight and
@@ -1783,15 +1834,6 @@ export function DiagramCanvas() {
     beginDrag(onMove, onUp);
   };
 
-  const showConnectNotice = (text: string, tone: 'ok' | 'err') => {
-    if (connectNoticeTimer.current !== null) clearTimeout(connectNoticeTimer.current);
-    setConnectNotice({ text, tone });
-    connectNoticeTimer.current = window.setTimeout(() => {
-      connectNoticeTimer.current = null;
-      setConnectNotice(null);
-    }, 2400);
-  };
-
   // Dedicated classes (not Tailwind's `cursor-*`) because cytoscape writes an
   // inline cursor on its container/canvas during interaction; only an
   // !important rule (see styles.css) wins over that. SELECT mode keeps the
@@ -1806,7 +1848,7 @@ export function DiagramCanvas() {
     <div className={`relative h-full w-full ${connectDrag ? 'cy-cursor-connecting' : ''}`}>
       <div
         ref={containerRef}
-        className={`cy-container absolute inset-0 ${canvasCursor}`}
+        className={`cy-container absolute inset-0 ${display.showGrid ? '' : 'cy-grid-hidden'} ${canvasCursor}`}
         onMouseDown={onCanvasMouseDown}
       />
       {/* Self-loop layer: cytoscape can't render loop edges with the segments
@@ -1937,21 +1979,11 @@ export function DiagramCanvas() {
             onDragHandle={(e) => onTableDragStart(e, p.id)}
             onResizeHandle={(e) => onTableResize(e, p.table.name, p.id)}
             onToggleCollapse={() => toggleCollapsed(p.table.name)}
-            onMarkDelete={() => {
-              const cy = cyRef.current;
-              if (!cy) return;
-              hideTables(cy, [p.id]);
-              setSelectedIds((current) => {
-                const next = new Set(current);
-                next.delete(p.id);
-                return next;
-              });
-              if (focusId === p.id) setFocusId(null);
-            }}
             onResetWidth={() => setTableWidth(p.table.name, null)}
             onConnectStart={(col, side, e) => onConnectStart(p.table.name, col, side, e)}
             noteColumns={noteColumnsByTable.get(p.table.name)}
             onOpenNote={(col, e) => onOpenNote(p.table.name, col, e)}
+            onReorderColumns={(columns) => setColumnOrder(p.table.name, columns)}
           />
         );
       })}

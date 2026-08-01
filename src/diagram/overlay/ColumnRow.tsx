@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import type { Column, Table } from '../../parser/types';
 import type { NoteSeverity } from '../../store/types';
+import type { ColumnDropPosition } from '../../store/columnOrder';
 import { columnRoleBadge, FIELD_ROW_HEIGHT, shortType } from '../buildGraph';
 import { highlightMatch } from './highlight';
 
@@ -24,6 +25,10 @@ interface ColumnRowProps {
   /** Click on the row: open the review-note bubble for this field. Also
    *  enables the hover highlight that signals the row is clickable. */
   onOpenNote?: (e: React.MouseEvent) => void;
+  /** Mousedown on the three-bar grip starts a vertical field reorder. */
+  onReorderStart?: (e: React.MouseEvent) => void;
+  /** Drag/drop feedback owned by TableOverlay. */
+  reorderState?: 'source' | ColumnDropPosition | null;
 }
 
 /**
@@ -47,6 +52,8 @@ export function ColumnRow({
   onConnectStart,
   noteSeverity = null,
   onOpenNote,
+  onReorderStart,
+  reorderState = null,
 }: ColumnRowProps) {
   const hasNote = noteSeverity !== null;
   const roleBadge = columnRoleBadge(col, table, showIndex);
@@ -71,12 +78,15 @@ export function ColumnRow({
         // Clickable-for-review affordance: rows light up on hover and open
         // the note bubble on click.
         onOpenNote && 'cursor-pointer hover:bg-sky-50/70 dark:hover:bg-sky-900/20',
+        reorderState === 'source' && 'bg-sky-50/80 opacity-60 dark:bg-sky-900/25',
       )}
       title={hasNote ? `${tooltip}\n（有评审批注，点击查看）` : tooltip}
       // Drop-target markers for the drag-to-connect gesture: the canvas finds
       // the row under the cursor via elementFromPoint + closest('[data-fk-col]').
       data-fk-table={table.name}
       data-fk-col={col.name}
+      data-column-order-table={table.name}
+      data-column-order-col={col.name}
       onClick={
         onOpenNote &&
         ((e) => {
@@ -85,6 +95,8 @@ export function ColumnRow({
         })
       }
     >
+      {reorderState === 'before' && <ColumnDropMarker position="top" />}
+      {reorderState === 'after' && <ColumnDropMarker position="bottom" />}
       <div
         className="flex items-center gap-2 px-2 leading-none"
         style={{ height: FIELD_ROW_HEIGHT }}
@@ -96,6 +108,35 @@ export function ColumnRow({
         >
           {roleBadge && <RoleBadge kind={roleBadge as 'PK' | 'U' | 'I'} />}
           {isFk && <FkBadge />}
+        </span>
+        {/* Keep the 14px slot in both modes so switching 阅读/编辑 never makes
+            every field label jump sideways. In edit mode, row hover reveals a
+            three-bar grip whose breathing cadence matches the connect dots. */}
+        <span className="flex h-[22px] w-[14px] shrink-0 items-center justify-center">
+          {onReorderStart && (
+            <button
+              type="button"
+              className={clsx(
+                'column-reorder-hit flex h-[22px] w-[14px] items-center justify-center rounded-sm',
+                'opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100',
+              )}
+              title="按住并上下拖动，调整字段显示顺序"
+              aria-label={`调整 ${table.name}.${col.name} 的显示顺序`}
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                onReorderStart(e);
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="column-reorder-grip" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+            </button>
+          )}
         </span>
         <span
           className="text-ink-800 dark:text-inkd-800 flex-1 min-w-0 truncate"
@@ -173,6 +214,18 @@ export function ColumnRow({
         </div>
       )}
     </div>
+  );
+}
+
+function ColumnDropMarker({ position }: { position: 'top' | 'bottom' }) {
+  return (
+    <span
+      className={clsx(
+        'pointer-events-none absolute left-2 right-2 z-20 h-[2px] rounded-full bg-sky-500 shadow-[0_0_7px_rgba(14,165,233,0.75)]',
+        position === 'top' ? '-top-px' : '-bottom-px',
+      )}
+      aria-hidden="true"
+    />
   );
 }
 

@@ -258,6 +258,11 @@ export function mergeWorkspaceArchives(
     parsedSources.map((source) => source.archive.state.tableWidths),
     conflicts,
   );
+  const columnOrders = mergeRecords(
+    '字段顺序',
+    parsedSources.map((source) => source.archive.state.columnOrders),
+    conflicts,
+  );
   const deletedTables = mergeRecords(
     '回收站',
     parsedSources.map((source) => source.archive.state.deletedTables),
@@ -306,6 +311,7 @@ export function mergeWorkspaceArchives(
     fieldNotes,
     collapsed,
     tableWidths,
+    columnOrders,
     nodePositions,
     manualRoutes,
     deletedTables,

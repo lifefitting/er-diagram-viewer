@@ -59,6 +59,11 @@ body {
     linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
 }
 
+.cy-container.cy-grid-hidden,
+.dark .cy-container.cy-grid-hidden {
+  background-image: none;
+}
+
 /*
  * Edge hover tooltip. Inverted in dark mode (light pill over dark bg) so it
  * still reads as a "tooltip" — a near-black pill on a dark canvas would
@@ -107,6 +112,20 @@ body {
   .connect-dot {
     animation: connect-dot-breathe 1.6s ease-in-out infinite;
   }
+  @keyframes column-reorder-breathe {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 1px rgba(245, 158, 11, 0.18));
+      opacity: 0.42;
+    }
+    50% {
+      filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.68));
+      opacity: 0.95;
+    }
+  }
+  .column-reorder-grip {
+    animation: column-reorder-breathe 1.6s ease-in-out infinite;
+  }
 }
 /* Hover = magnetic snap feedback: halo locks on bright, dot grows. */
 .connect-dot-hit:hover .connect-dot {
@@ -116,6 +135,45 @@ body {
 }
 .connect-dot {
   transition: transform 0.12s ease-out;
+}
+
+/* Field reorder affordance: three quiet bars, spatially separated from the
+   edge connect ports. It shares their 1.6s breathing cadence but stays neutral
+   grey so the two gestures remain visually distinct. */
+.column-reorder-hit {
+  cursor: grab;
+}
+.column-reorder-hit:hover .column-reorder-grip,
+.column-reorder-hit:focus-visible .column-reorder-grip {
+  animation: none;
+  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.72));
+  opacity: 1;
+  transform: scale(1.12);
+}
+.column-reorder-grip {
+  display: flex;
+  width: 9px;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0.55;
+  transition:
+    transform 0.12s ease-out,
+    opacity 0.12s ease-out;
+}
+.column-reorder-grip > span {
+  display: block;
+  height: 1px;
+  width: 100%;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.72);
+}
+.dark .column-reorder-grip > span {
+  background: rgba(148, 163, 184, 0.68);
+}
+body.column-reorder-active,
+body.column-reorder-active * {
+  cursor: grabbing !important;
+  user-select: none !important;
 }
 
 /* Cursor state machine for drawing a connection:

@@ -11,8 +11,6 @@ interface TableHeaderProps {
   query?: string;
   onDragHandle: (e: React.MouseEvent) => void;
   onToggleCollapse: () => void;
-  /** Record a table-level 建议删除 decision and hide the card. */
-  onMarkDelete?: () => void;
 }
 
 export function TableHeader({
@@ -23,12 +21,11 @@ export function TableHeader({
   query = '',
   onDragHandle,
   onToggleCollapse,
-  onMarkDelete,
 }: TableHeaderProps) {
   const shardInfo = table.shardInfo;
   return (
     <div
-      className="group flex items-center gap-1.5 text-[13px] font-semibold px-2 cursor-grab active:cursor-grabbing"
+      className="flex items-center gap-1.5 text-[13px] font-semibold px-2 cursor-grab active:cursor-grabbing"
       style={{
         background: moduleColor.header,
         color: moduleColor.text,
@@ -68,29 +65,6 @@ export function TableHeader({
         >
           {moduleKey}
         </span>
-      )}
-      {onMarkDelete && (
-        <button
-          type="button"
-          className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded opacity-0 transition-opacity hover:bg-white/20 focus:opacity-100 group-hover:opacity-100"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onMarkDelete();
-          }}
-          title="标记此表为建议删除"
-          aria-label={`标记 ${table.name} 为建议删除`}
-        >
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden>
-            <path
-              d="M3 4h10M6 4V2.5h4V4m-5.5 0 .6 9h5.8l.6-9M6.8 6.5v4M9.2 6.5v4"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
       )}
     </div>
   );
