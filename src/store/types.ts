@@ -15,6 +15,8 @@ export interface DisplayOptions {
   showComment: boolean;
   showIndex: boolean;
   showLowConfidence: boolean;
+  /** Draw the subtle canvas grid behind cards and connectors. */
+  showGrid: boolean;
   /** Draw the inferred logical (business-key) links on the canvas. The 逻辑
    *  关联 section's 隐藏/显示连线 toggle — hide them all to compare the
    *  physical-only picture, flip back to see the full one. */
@@ -166,6 +168,10 @@ export interface CanvasState {
   sidebarCollapsed: boolean;
   collapsed: Record<string, boolean>;
   tableWidths: Record<string, number>;
+  /** User-defined visual field order per table. This is presentation state:
+   *  SQL text remains untouched, while refresh/archive/import preserve the
+   *  reviewed order. Incremental SQL edits append newly added columns. */
+  columnOrders: Record<string, string[]>;
   /** Persisted card positions (keyed by cy node id) so a page refresh restores
    *  the current arrangement instead of re-running the auto-layout. Cleared on
    *  a new import (`setSql`); kept on refresh (`reparse`). Reset to the
@@ -195,6 +201,8 @@ export interface CanvasState {
   /** Apply several table width overrides atomically (multi-select 等宽). */
   setTableWidths: (widths: Record<string, number>) => void;
   resetTableWidths: () => void;
+  /** Persist and apply one table's complete visual field order. */
+  setColumnOrder: (tableName: string, columnNames: string[]) => void;
   setNodePositions: (positions: Record<string, { x: number; y: number }>) => void;
   setViewport: (v: Viewport | null) => void;
   setManualRoute: (fkKey: string, points: { x: number; y: number }[]) => void;

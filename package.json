@@ -1,7 +1,7 @@
 {
   "name": "er-diagram-viewer",
   "private": true,
-  "version": "0.3.3",
+  "version": "0.3.5",
   "type": "module",
   "description": "纯前端数据库设计评审工作台：将 SQL DDL 转为可编辑 ER 图，支持关系推断、工作区合并、结构化评审、标准文档与加密存档。Pure-frontend SQL DDL → reviewable ER diagram workspace.",
   "keywords": [

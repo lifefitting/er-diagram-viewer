@@ -1,5 +1,7 @@
 import clsx from 'clsx';
+import { useEffect, useRef, useState } from 'react';
 import type { DisplayOptions } from '../../store';
+import { reorderColumnNames, type ColumnDropPosition } from '../../store/columnOrder';
 import type { NoteSeverity, SearchScope } from '../../store/types';
 import type { NodePos, OverlayState } from '../types';
 import { ColumnRow } from './ColumnRow';
@@ -40,6 +42,14 @@ interface TableOverlayProps {
   noteColumns?: Map<string, NoteSeverity>;
   /** Click on a field row: open its review-note bubble. */
   onOpenNote?: (colName: string, e: React.MouseEvent) => void;
+  /** Commit one complete visual field order after a grip drag. */
+  onReorderColumns?: (columnNames: string[]) => void;
+}
+
+interface ColumnDragState {
+  source: string;
+  target: string | null;
+  position: ColumnDropPosition | null;
 }
 
 /**
@@ -69,6 +79,7 @@ export function TableOverlay({
   onConnectStart,
   noteColumns,
   onOpenNote,
+  onReorderColumns,
 }: TableOverlayProps) {
   const { table, x, y, w, h, moduleColor } = pos;
   const tableNameQuery = searchScope === 'field' ? '' : query;
@@ -91,6 +102,82 @@ export function TableOverlay({
     : display.onlyPk
       ? table.columns.filter((c) => c.isPrimaryKey || table.primaryKey.includes(c.name))
       : table.columns;
+  const [columnDrag, setColumnDrag] = useState<ColumnDragState | null>(null);
+  const columnDragCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(
+    () => () => {
+      columnDragCleanupRef.current?.();
+      document.body.classList.remove('column-reorder-active');
+    },
+    [],
+  );
+
+  const onColumnReorderStart = (source: string, e: React.MouseEvent) => {
+    if (!onReorderColumns || display.onlyPk) return;
+    columnDragCleanupRef.current?.();
+    const startY = e.clientY;
+    let active = false;
+    let cancelled = false;
+    let target: { name: string; position: ColumnDropPosition } | null = null;
+
+    const cleanup = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('blur', onBlur);
+      document.body.classList.remove('column-reorder-active');
+      if (columnDragCleanupRef.current === cleanup) columnDragCleanupRef.current = null;
+    };
+    const cancel = () => {
+      cancelled = true;
+      cleanup();
+      setColumnDrag(null);
+    };
+    const onMove = (event: MouseEvent) => {
+      if (!active && Math.abs(event.clientY - startY) < 5) return;
+      if (!active) {
+        active = true;
+        document.body.classList.add('column-reorder-active');
+      }
+      const hit = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+      const row = hit?.closest('[data-column-order-col]') as HTMLElement | null;
+      if (!row || row.dataset.columnOrderTable !== table.name) {
+        target = null;
+        setColumnDrag({ source, target: null, position: null });
+        return;
+      }
+      const name = row.dataset.columnOrderCol ?? '';
+      if (!name || name === source) {
+        target = null;
+        setColumnDrag({ source, target: null, position: null });
+        return;
+      }
+      const rect = row.getBoundingClientRect();
+      const position: ColumnDropPosition =
+        event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+      target = { name, position };
+      setColumnDrag({ source, target: name, position });
+    };
+    const onUp = () => {
+      cleanup();
+      setColumnDrag(null);
+      if (!active || cancelled || !target) return;
+      const current = table.columns.map((column) => column.name);
+      const next = reorderColumnNames(current, source, target.name, target.position);
+      if (next.some((name, index) => name !== current[index])) onReorderColumns(next);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') cancel();
+    };
+    const onBlur = () => cancel();
+
+    columnDragCleanupRef.current = cleanup;
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp, { once: true });
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('blur', onBlur, { once: true });
+  };
 
   return (
     <div
@@ -153,6 +240,18 @@ export function TableOverlay({
               onConnectStart={onConnectStart && ((side, e) => onConnectStart(c.name, side, e))}
               noteSeverity={noteColumns?.get(c.name) ?? null}
               onOpenNote={onOpenNote && ((e) => onOpenNote(c.name, e))}
+              onReorderStart={
+                onReorderColumns && !display.onlyPk
+                  ? (e) => onColumnReorderStart(c.name, e)
+                  : undefined
+              }
+              reorderState={
+                columnDrag?.source === c.name
+                  ? 'source'
+                  : columnDrag?.target === c.name
+                    ? columnDrag.position
+                    : null
+              }
             />
           ))}
         </div>

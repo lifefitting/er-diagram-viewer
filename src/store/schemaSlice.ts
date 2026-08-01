@@ -7,6 +7,7 @@ import {
   reconcileDerivationSettings,
   reconcileWorkspaceState,
 } from './reconcileSqlUpdate';
+import { applyColumnOrders, reconcileColumnOrders } from './columnOrder';
 
 /** Schema, inferred FKs, modules. Owns the parse pipeline entry points. */
 export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (set, get) => ({
@@ -39,6 +40,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       fieldNotes: {},
       collapsed: {},
       tableWidths: {},
+      columnOrders: {},
       nodePositions: {},
       manualRoutes: {},
       deletedTables: {},
@@ -77,7 +79,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
     const preserved = reconcileWorkspaceState(current, next.schema, next.inferred, settings);
     set({
       rawSql: sql,
-      schema: next.schema,
+      schema: applyColumnOrders(next.schema, preserved.columnOrders),
       inferred: next.inferred,
       modules: next.modules,
       ...preserved,
@@ -93,7 +95,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       get().workspaceGroups,
       get().moduleOverrides,
     );
-    set({ schema, inferred, modules });
+    const columnOrders = reconcileColumnOrders(get().columnOrders, schema);
+    set({ schema: applyColumnOrders(schema, columnOrders), inferred, modules, columnOrders });
   },
   setPalette(p) {
     // A merged import initially keeps each source palette. Once the user picks
@@ -121,7 +124,14 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       get().workspaceGroups,
       get().moduleOverrides,
     );
-    set({ logicalKeys: keys, schema, inferred, modules });
+    const columnOrders = reconcileColumnOrders(get().columnOrders, schema);
+    set({
+      logicalKeys: keys,
+      schema: applyColumnOrders(schema, columnOrders),
+      inferred,
+      modules,
+      columnOrders,
+    });
   },
   assignTablesToModule(nodeIds, moduleKey) {
     set((s) => {
@@ -161,6 +171,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       workspaceGroups,
       moduleOverrides,
     );
+    const columnOrders = reconcileColumnOrders(rest.columnOrders ?? {}, schema);
     set({
       // fresh-workspace baseline (mirrors setSql's reset list)
       decisions: {},
@@ -179,7 +190,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       logicalKeys,
       moduleOverrides,
       workspaceGroups,
-      schema,
+      columnOrders,
+      schema: applyColumnOrders(schema, columnOrders),
       inferred,
       modules,
       // Remount the canvas: replays the refresh-restore path (positions +

@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { AppState, CanvasState } from './types';
 import { visibleSchema } from './selectors';
+import { applyColumnOrders, reconcileColumnOrders } from './columnOrder';
 
 type RoutePoint = { x: number; y: number };
 
@@ -33,6 +34,7 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasState> = (s
   sidebarCollapsed: false,
   collapsed: {},
   tableWidths: {},
+  columnOrders: {},
   nodePositions: {},
   manualRoutes: {},
   deletedTables: {},
@@ -82,6 +84,19 @@ export const createCanvasSlice: StateCreator<AppState, [], [], CanvasState> = (s
   },
   resetTableWidths() {
     set({ tableWidths: {} });
+  },
+  setColumnOrder(tableName, columnNames) {
+    set((s) => {
+      if (!s.schema) return {};
+      const table = s.schema.tables.find((item) => item.name === tableName);
+      if (!table) return {};
+      const requested = { ...s.columnOrders, [table.name]: [...columnNames] };
+      const columnOrders = reconcileColumnOrders(requested, s.schema);
+      return {
+        columnOrders,
+        schema: applyColumnOrders(s.schema, columnOrders),
+      };
+    });
   },
   setNodePositions(positions) {
     set({ nodePositions: positions });

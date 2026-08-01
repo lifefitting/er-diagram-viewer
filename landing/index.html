@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#6366f1" />
     <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%236366f1%22/><path d=%22M17 17h30v12H17zm0 18h30v12H17z%22 fill=%22white%22/><path d=%22M25 29v6m14-6v6%22 stroke=%22white%22 stroke-width=%224%22/></svg>" />
 
     <title>ER Diagram Viewer — 把 SQL DDL 变成可评审的 ER 图</title>
     <meta
       name="description"
-      content="纯前端的数据库设计评审工作台。粘贴 SQL DDL 秒级生成可编辑 ER 图，推断外键与业务键关联，支持布局精调、多工作区保布局合并、结构化评审、标准文档导出与密码加密存档。零后端，离线可用。"
+      content="纯前端的数据库设计评审工作台。粘贴 SQL DDL 秒级生成可编辑 ER 图，支持增量 SQL 续编不重排、字段拖拽排序、画布快控、关系推断、多工作区合并、结构化评审与加密存档。零后端，离线可用。"
     />
     <meta name="keywords" content="ER图,ER Diagram,SQL DDL,数据库关系图,外键推断,数据库评审,Schema Review,评审报告,数据库设计说明文档,MySQL,PostgreSQL" />
     <meta name="author" content="ER Diagram Viewer" />
@@ -18,7 +19,7 @@
     <meta property="og:title" content="ER Diagram Viewer — 把 SQL DDL 变成可评审的 ER 图" />
     <meta
       property="og:description"
-      content="纯前端、离线可用的数据库评审工作台：外键推断 + 多工作区合并 + 精准布局 + 结构化批注 + 标准文档 + 加密存档。看清关系，评完带走。"
+      content="纯前端、离线可用的数据库评审工作台：增量 SQL 续编 + 外键推断 + 精准布局 + 字段排序 + 多工作区合并 + 结构化评审。看清关系，持续评审。"
     />
     <meta name="twitter:card" content="summary_large_image" />
 
@@ -355,7 +356,7 @@
       .timeline {
         display: flex;
         gap: 0;
-        min-width: 720px;
+        min-width: 1020px;
       }
       .tl-item {
         flex: 1 1 0;
@@ -500,7 +501,7 @@
       <!-- ============== HERO ============== -->
       <section class="hero">
         <div class="container">
-          <span class="badge">v0.3.3 · 工作区合并 / 精准布局 / 加密存档</span>
+          <span class="badge">v0.3.5 · 增量续编 / 字段排序 / 画布快控</span>
           <h1>
             把 SQL DDL 变成<br />
             <span class="accent">可评审的 ER 图</span>
@@ -510,7 +511,8 @@
             没写 <code>FOREIGN KEY</code>？按命名、类型、索引推断出来给你逐条确认；推断不到的，字段间直接拖线补上；
             分库分表靠 <code>out_trade_no</code> 这类业务键关联？扫描出来画成逻辑关联线。
             切到编辑模式，用 <code>Alt</code> / <code>Shift</code> 精调表位置，批量等宽、对齐和均匀分布；
-            回到阅读模式，布局即刻锁定。逐表、逐字段写下评审意见，一键导出<strong>评审报告</strong>与<strong>标准数据库设计说明书</strong>。
+            字段顺序也能直接拖动。后续追加 SQL 时，已有布局、连线和评审状态不会被推倒重来；
+            画布右键即可缩放、全览或切换网格。回到阅读模式，布局即刻锁定。逐表、逐字段写下评审意见，一键导出<strong>评审报告</strong>与<strong>标准数据库设计说明书</strong>。
             多个评审现场可直接合并，各自原始布局尽量保留；导出工作区时用密码加密，旧版明文存档仍可打开。
             看清关系，评完带走。零后端，完全本地，导入的 SQL 不出你的浏览器。
           </p>
@@ -689,8 +691,13 @@
             </div>
             <div class="feature">
               <div class="feature-icon">✥</div>
-              <h3>精准布局 · 读编分离</h3>
-              <p>阅读模式锁定布局，编辑模式开放框选、移动、连线与批注。<code>Alt</code> 仅水平移动，<code>Shift</code> 纵向超精度移动并在端口对齐时吸附。多选表可等宽、六向对齐、水平/垂直均匀分布，全部支持撤销。</p>
+              <h3>精准布局 · 字段排序</h3>
+              <p>阅读模式锁定布局，编辑模式开放框选、移动、连线与批注。<code>Alt</code> 仅水平移动，<code>Shift</code> 纵向超精度移动；多选表可等宽、对齐和均匀分布，字段三杠握柄可直接调整显示顺序。</p>
+            </div>
+            <div class="feature">
+              <div class="feature-icon">↻</div>
+              <h3>增量 SQL · 续编不重排</h3>
+              <p>在现有 DDL 上追加表或字段时，保留卡片位置、宽度、字段顺序、手工路由、视口、模块和评审记录，只把新增表放到右侧。分片表合并改名也能延续原评审现场。</p>
             </div>
             <div class="feature">
               <div class="feature-icon">🔐</div>
@@ -704,8 +711,8 @@
             </div>
             <div class="feature">
               <div class="feature-icon">⌕</div>
-              <h3>范围搜索 · 暗色模式</h3>
-              <p>搜索可切换「全部 / 仅表名 / 仅字段名」，匹配文本与画布高亮始终一致；回车在结果间跳转、画布自动跟随。明暗主题跟随系统，暗色下各配色的连线都清晰可见。</p>
+              <h3>画布快控 · 范围搜索</h3>
+              <p>画布右键直接放大、缩小、全览和显示/隐藏网格，底部按 15%～100% 六档缩放。搜索可切换「全部 / 仅表名 / 仅字段名」，回车在结果间跳转，画布自动跟随。</p>
             </div>
           </div>
         </div>
@@ -742,8 +749,8 @@ bun run build:single <span class="c"># → ./dist-single/er-diagram-viewer.html<
         <div class="container">
           <div class="section-head">
             <div class="section-eyebrow">版本轨迹</div>
-            <h2>从"画出来"到"评得动"</h2>
-            <p class="section-lead">每个版本解决一层问题：先看清，再好用，最后把评审做完。</p>
+            <h2>从"画出来"到"持续评"</h2>
+            <p class="section-lead">每个版本解决一层问题：先看清，再评审，最后让迭代不必返工。</p>
           </div>
           <div class="timeline-wrap">
             <div class="timeline">
@@ -767,10 +774,15 @@ bun run build:single <span class="c"># → ./dist-single/er-diagram-viewer.html<
                 <h4>评审闭环</h4>
                 <p>字段拖线补关系、业务键逻辑关联扫描、逐字段评审批注（带时间戳），导出评审报告与数据库设计说明文档。</p>
               </div>
-              <div class="tl-item current">
+              <div class="tl-item">
                 <span class="tl-ver">v0.3.3</span><span class="tl-date">2026-07</span>
                 <h4>把多个评审现场合在一起</h4>
                 <p>保布局合并多工作区，批量调模块与精准对齐分布；明确区分阅读/编辑模式，存档加密同时兼容旧格式。</p>
+              </div>
+              <div class="tl-item current">
+                <span class="tl-ver">v0.3.5</span><span class="tl-date">2026-08</span>
+                <h4>续编而不推倒重来</h4>
+                <p>追加 SQL 保留布局、路由与评审记录；字段可拖拽排序，画布右键快控与六档缩放让日常操作更直接。版本从 v0.3.3 直接跃迁。</p>
               </div>
             </div>
           </div>
@@ -863,6 +875,13 @@ bun run build:single <span class="c"># → ./dist-single/er-diagram-viewer.html<
                   <td>部分支持</td>
                 </tr>
                 <tr>
+                  <td>增量 SQL 保留评审现场</td>
+                  <td class="highlight"><span class="ok">✓ 布局 + 路由 + 决策</span></td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
                   <td>多工作区保布局合并</td>
                   <td class="highlight"><span class="ok">✓ 合并预检 + 整组避让</span></td>
                   <td class="no">—</td>
@@ -900,7 +919,7 @@ bun run build:single <span class="c"># → ./dist-single/er-diagram-viewer.html<
       <section class="cta-band">
         <div class="container">
           <h2>下一场数据库评审，从贴一段 DDL 开始</h2>
-          <p>粘贴 DDL → 合并工作区 → 看清关系 → 精调布局 → 写批注出文档 → 加密存档。</p>
+          <p>粘贴 DDL → 看清关系 → 精调布局 → 追加 SQL 继续评 → 写批注出文档 → 加密存档。</p>
           <div class="cta-group">
             <a class="btn btn-primary" href="./app/">立即试用</a>
             <a class="btn btn-secondary" href="https://github.com/lifefitting/er-diagram-viewer" target="_blank" rel="noopener">查看源码</a>

@@ -178,16 +178,28 @@ export function sanitizePersisted(raw: unknown): Persisted {
     isRecord(raw.display) &&
     ['onlyPk', 'showType', 'showComment', 'showIndex', 'showLowConfidence'].every(
       (k) => typeof (raw.display as Record<string, unknown>)[k] === 'boolean',
+    ) &&
+    ['showGrid', 'showLogicalLinks', 'showManualLinks'].every(
+      (k) =>
+        (raw.display as Record<string, unknown>)[k] === undefined ||
+        typeof (raw.display as Record<string, unknown>)[k] === 'boolean',
     )
   )
     // Later-added visibility toggles default ON for snapshots predating them
     // (the shallow store merge would otherwise leave them undefined = hidden).
-    out.display = { showLogicalLinks: true, showManualLinks: true, ...raw.display };
+    out.display = { showGrid: true, showLogicalLinks: true, showManualLinks: true, ...raw.display };
 
   if (isRecord(raw.collapsed) && Object.values(raw.collapsed).every((v) => typeof v === 'boolean'))
     out.collapsed = raw.collapsed;
   if (isRecord(raw.tableWidths) && Object.values(raw.tableWidths).every(isFiniteNum))
     out.tableWidths = raw.tableWidths;
+  if (
+    isRecord(raw.columnOrders) &&
+    Object.values(raw.columnOrders).every(
+      (order) => isStringArray(order) && order.length > 0 && new Set(order).size === order.length,
+    )
+  )
+    out.columnOrders = raw.columnOrders;
   if (isRecord(raw.deletedTables)) {
     // Legacy snapshots stored `true`; retain the decision with an unknown time.
     const decisions: Record<string, { action: 'delete'; updatedAt: string }> = {};

@@ -66,6 +66,41 @@ describe('incremental SQL updates', () => {
     expect(state.fieldNotes[fieldNoteKey('orders', 'total')].text).toBe('金额字段需统一精度');
   });
 
+  it('persists a field order and appends newly imported fields without relayout state loss', () => {
+    useApp.getState().setColumnOrder('orders', ['total', 'id', 'user_id']);
+    useApp.setState({
+      nodePositions: {
+        [nodeId('orders')]: { x: 520, y: 260 },
+      },
+    });
+
+    useApp
+      .getState()
+      .updateSql(
+        [
+          'CREATE TABLE users (id BIGINT PRIMARY KEY, email VARCHAR(128));',
+          'CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT, total INT, status INT);',
+        ].join('\n'),
+      );
+
+    expect(useApp.getState().columnOrders.orders).toEqual(['total', 'id', 'user_id', 'status']);
+    expect(
+      useApp
+        .getState()
+        .schema?.tables.find((table) => table.name === 'orders')
+        ?.columns.map((column) => column.name),
+    ).toEqual(['total', 'id', 'user_id', 'status']);
+    expect(useApp.getState().nodePositions[nodeId('orders')]).toEqual({ x: 520, y: 260 });
+
+    useApp.getState().reparse();
+    expect(
+      useApp
+        .getState()
+        .schema?.tables.find((table) => table.name === 'orders')
+        ?.columns.map((column) => column.name),
+    ).toEqual(['total', 'id', 'user_id', 'status']);
+  });
+
   it('prunes state belonging to removed tables, columns and relations', () => {
     const inferredKey = canonicalFkKey(useApp.getState().inferred[0]);
     useApp.setState({
@@ -113,6 +148,7 @@ describe('incremental SQL updates', () => {
       viewport: { x: 5, y: 8, zoom: 1.2 },
       collapsed: { users: true },
       tableWidths: { users: 300 },
+      columnOrders: { users: ['email', 'id'] },
     });
 
     useApp.getState().updateSql('CREATE TABLE ledger (id BIGINT PRIMARY KEY);');
@@ -123,6 +159,7 @@ describe('incremental SQL updates', () => {
     expect(state.viewport).toBeNull();
     expect(state.collapsed).toEqual({});
     expect(state.tableWidths).toEqual({});
+    expect(state.columnOrders).toEqual({});
   });
 
   it('rekeys table and field state across case-only identifier changes', () => {
@@ -145,5 +182,67 @@ describe('incremental SQL updates', () => {
     expect(state.tableWidths).toEqual({ Users: 333 });
     expect(state.collapsed).toEqual({ Users: true });
     expect(state.fieldNotes[fieldNoteKey('Users', 'Email')].text).toBe('保留批注');
+  });
+
+  it('preserves layout across shard-merge rename (orders_2024 → orders_*)', () => {
+    const singleShard = [
+      'CREATE TABLE orders_2024 (id BIGINT PRIMARY KEY, user_id BIGINT, total INT);',
+    ].join('\n');
+    useApp.getState().setSql(singleShard);
+    useApp.setState({
+      nodePositions: { [nodeId('orders_2024')]: { x: 240, y: 120 } },
+      viewport: { x: 10, y: 20, zoom: 1.5 },
+      collapsed: { orders_2024: true },
+      tableWidths: { orders_2024: 340 },
+    });
+    useApp.getState().setFieldNote('orders_2024', 'total', '分表合并后应保留');
+
+    useApp
+      .getState()
+      .updateSql(
+        [
+          singleShard,
+          'CREATE TABLE orders_2025 (id BIGINT PRIMARY KEY, user_id BIGINT, total INT);',
+        ].join('\n'),
+      );
+    const state = useApp.getState();
+
+    expect(state.schema?.tables.map((table) => table.name)).toEqual(['orders_*']);
+    expect(state.nodePositions).toEqual({ [nodeId('orders_*')]: { x: 240, y: 120 } });
+    expect(state.viewport).toEqual({ x: 10, y: 20, zoom: 1.5 });
+    expect(state.collapsed).toEqual({ 'orders_*': true });
+    expect(state.tableWidths).toEqual({ 'orders_*': 340 });
+    expect(state.fieldNotes[fieldNoteKey('orders_*', 'total')].text).toBe('分表合并后应保留');
+  });
+
+  it('preserves layout when shard representative absorbs a compatible base table', () => {
+    const shardsOnly = [
+      'CREATE TABLE orders_2024 (id BIGINT PRIMARY KEY, user_id BIGINT, total INT);',
+      'CREATE TABLE orders_2025 (id BIGINT PRIMARY KEY, user_id BIGINT, total INT);',
+    ].join('\n');
+    useApp.getState().setSql(shardsOnly);
+    expect(useApp.getState().schema?.tables.map((table) => table.name)).toEqual(['orders_*']);
+    useApp.setState({
+      nodePositions: { [nodeId('orders_*')]: { x: 80, y: 60 } },
+      tableWidths: { 'orders_*': 300 },
+      collapsed: { 'orders_*': true },
+    });
+    useApp.getState().setFieldNote('orders_*', 'total', '吸收基表后应保留');
+
+    useApp
+      .getState()
+      .updateSql(
+        [
+          'CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT, total INT);',
+          shardsOnly,
+        ].join('\n'),
+      );
+    const state = useApp.getState();
+
+    expect(state.schema?.tables.map((table) => table.name)).toEqual(['orders']);
+    expect(state.nodePositions).toEqual({ [nodeId('orders')]: { x: 80, y: 60 } });
+    expect(state.tableWidths).toEqual({ orders: 300 });
+    expect(state.collapsed).toEqual({ orders: true });
+    expect(state.fieldNotes[fieldNoteKey('orders', 'total')].text).toBe('吸收基表后应保留');
   });
 });

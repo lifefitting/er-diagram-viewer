@@ -43,6 +43,7 @@ const SNAPSHOT = {
     showComment: true,
     showIndex: true,
     showLowConfidence: false,
+    showGrid: true,
     showLogicalLinks: true,
     showManualLinks: true,
   },

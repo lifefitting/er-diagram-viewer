@@ -15,11 +15,13 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
       showComment: true,
       showIndex: true,
       showLowConfidence: false,
+      showGrid: true,
       showLogicalLinks: true,
       showManualLinks: true,
     },
     collapsed: { a: true },
     tableWidths: { a: 320 },
+    columnOrders: { a: ['status', 'id'] },
     deletedTables: {
       't:b': { action: 'delete', updatedAt: '2026-07-29T12:00:00.000Z' },
     },
@@ -88,6 +90,16 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
       false,
     );
     expect('manualRoutes' in sanitizePersisted({ ...valid, manualRoutes: { k: [{ x: 1 }] } })).toBe(
+      false,
+    );
+  });
+
+  it('keeps valid field orders and drops duplicate or malformed entries', () => {
+    expect(sanitizePersisted(valid).columnOrders).toEqual({ a: ['status', 'id'] });
+    expect(
+      'columnOrders' in sanitizePersisted({ ...valid, columnOrders: { a: ['id', 'id'] } }),
+    ).toBe(false);
+    expect('columnOrders' in sanitizePersisted({ ...valid, columnOrders: { a: ['id', 3] } })).toBe(
       false,
     );
   });
@@ -194,6 +206,18 @@ describe('sanitizePersisted (P2 #5 — shape guard on every load)', () => {
     expect('palette' in sanitizePersisted({ ...valid, palette: 'rainbow' })).toBe(false);
     expect(sanitizePersisted({ ...valid, palette: 'professional' }).palette).toBe('professional');
     expect('display' in sanitizePersisted({ ...valid, display: { onlyPk: true } })).toBe(false);
+    expect(
+      'display' in
+        sanitizePersisted({ ...valid, display: { ...valid.display, showGrid: 'sometimes' } }),
+    ).toBe(false);
+  });
+
+  it('defaults the grid on for display snapshots that predate the toggle', () => {
+    const { showGrid: _showGrid, ...legacyDisplay } = valid.display;
+    expect(sanitizePersisted({ ...valid, display: legacyDisplay }).display).toEqual({
+      showGrid: true,
+      ...legacyDisplay,
+    });
   });
 
   it('drops decisions with an out-of-domain value', () => {

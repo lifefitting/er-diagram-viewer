@@ -2,6 +2,8 @@
 
 > 把 `CREATE TABLE` / `ALTER TABLE` 脚本贴进浏览器，秒级生成可交互的 ER 图。即使脚本没写 `FOREIGN KEY`，也会按命名 + 类型 + 索引启发式推断外键关系，并允许人工确认。
 
+当前稳定基线：**v0.3.5**（增量 SQL 续编、字段排序、画布快控与评审现场保护）。
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/lifefitting/er-diagram-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/lifefitting/er-diagram-viewer/actions/workflows/ci.yml)
 [![Pages](https://github.com/lifefitting/er-diagram-viewer/actions/workflows/pages.yml/badge.svg)](https://github.com/lifefitting/er-diagram-viewer/actions/workflows/pages.yml)
@@ -26,28 +28,32 @@
 - **轻量 SQL 解析**：手写词法器，覆盖 MySQL / PostgreSQL / SQLite 的 DDL 公共子集；不支持的语句会显式产出 warning，不再静默丢失
 - **隐式 FK 推断**：命名后缀（`_id` / `Id` 及 `_ref` / `Ref`）+ 类型一致 + 索引优先 + 同命名空间前缀匹配（`credential_ref` → `iam_credential`）+ 复合前缀兜底，分高 / 中 / 低三档置信度，每条都附"推断理由"
 - **分片表自动合并**：识别 `orders_0..orders_31` 这类按尾号水平分片的同构表，合并为单一逻辑表，避免推断阶段产生分片之间的噪声边；若同时存在同名同构基表（如 `orders` + `orders_202401…` 的分区表形态），基表一并吸收，节点保留基表原名
-- **模块自动着色**：按 FK 邻接 + 表名前缀聚类业务模块，四套调色板（鲜艳 / 粉彩 / 大地 / 单色）可切换
+- **模块自动着色**：按 FK 邻接 + 表名前缀聚类业务模块，五套调色板（沉稳 / 明快 / 柔和 / 大地 / 单色）可切换
 - **出版级自动布局**：基于 dagre 的语义化「从左到右分层布局」，预留分层间隙作为布线通道，让外键尽量笔直、尽量不交叉；节点用 React HTML 覆盖层渲染（表名、注释副标题、PK / Unique / Index / FK 徽标、列类型）
-- **可编辑画布**：框选多选 + 成组拖动、手型平移模式（`Space` 拖拽 / 中键）、分级缩放（0.25→4 档位吸附）、撤销 / 重做（位置 / 宽度 / 连线，`⌘Z`），手工布局跨刷新自动保存
+- **可编辑画布**：框选多选 + 成组拖动、手型平移模式（`Space` 拖拽 / 中键）、六档缩放（15%→100%）、画布右键快控、撤销 / 重做（位置 / 宽度 / 连线，`⌘Z`），手工布局跨刷新自动保存
 - **连线可微调**：外键连线走正交折线、自动绕开表体，穿同一间隙的多条连线自动分道（各占一条车道、不叠成一条线）；可拖拽线段中点手动微调走线，手改后持久保存
 - **表卡片精细控制**：单击折叠到仅 PK 行、右侧把手手动调宽、双击宽度把手还原自动测算
+- **字段顺序与布局精调**：编辑模式下拖动字段三杠握手调整顺序；`Alt` 仅水平移动，
+  `Shift` 纵向微调；多选表支持对齐、均匀分布和按最宽表等宽
 - **隐藏 / 回收站**：`Delete` 把表移出视图（不改 SQL），左下角回收站逐个或一键还原；导出同步排除
 - **三态搜索 + 命中高亮 + 匹配导航**：命中（amber ring）/ FK 邻居（正常）/ 其余（淡化），同时匹配表名、列名、表注释、列注释，并像 Chrome 查找一样给命中文本加黄色底色；搜索框旁显示「当前/总数」，`回车` / `Shift+回车` 在匹配间前后跳转，画布平移跟随当前命中
+- **搜索范围与工作模式**：搜索可限定为全部、表名或字段；阅读模式锁定布局，编辑模式开放布局、连线、评审和字段排序
 - **手动连线（连完即所得）**：悬停字段两侧的呼吸触点，拖一条正交折线到目标字段即建立关系——落在主键/唯一列记为物理外键，否则记为逻辑关联；点选 / `Shift` 批选后 `Delete` 批量删除，「手动连线」面板可逐行切换物理/逻辑类型（方向 = 绘制方向），同表关系走同侧折线回环
 - **逻辑关联（业务键）**：分库分表没有物理外键？「扫描业务键」列出 `out_trade_no` 这类跨表共享列簇，由你勾选用哪些字段推断，生成无向点状关联线——不参与模块聚类、低布局权重，DDL 导出中以 `-- LOGICAL:` 注释留痕；「逻辑关联」「手动连线」区块均可一键隐藏/显示整类连线
 - **字段评审批注**：点击字段弹出批注气泡（自动记录时间），字段旁琥珀圆点标记，画布右侧「评审建议」浮层实时汇总（最新在前、点击定位、可折叠）
 - **导出**：PNG 图像；SVG 矢量图（与画布走线一致）；含已确认推断 FK 的补全 DDL；**评审报告**（决策状态 + 逻辑关联 + 带时间戳的字段意见）；**数据库设计说明文档**（标准表结构格式，仅已确认关系）—— 均只导出当前可见（未隐藏）的内容
 - **手动确认**：每条推断 FK 都能在面板上接受 / 拒绝，决策实时反映在图上
+- **工作区存档**：导出完整评审现场（SQL、决策、批注、布局、视口和回收站）；支持密码加密、旧版未加密存档和多个存档合并导入
 - **明暗主题**：跟随系统 / 强制亮色 / 强制暗色
 - **按需加载**：Cytoscape (~600 KB) 经 React.lazy + manualChunks 拆出独立 chunk，主 bundle 不被它拖慢首屏
 
 ## 三种用法
 
-| 场景 | 怎么用 |
-| --- | --- |
-| **临时看一眼** | 打开 [Live Demo](https://lifefitting.github.io/er-diagram-viewer/app/)，把 DDL 粘进对话框 |
+| 场景                   | 怎么用                                                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **临时看一眼**         | 打开 [Live Demo](https://lifefitting.github.io/er-diagram-viewer/app/)，把 DDL 粘进对话框                               |
 | **离线 / 内网 / U 盘** | 从 [Releases](https://github.com/lifefitting/er-diagram-viewer/releases/latest) 下载 `er-diagram-viewer.html`，双击即用 |
-| **自托管 / 二次开发** | 见下方 [快速启动](#快速启动) |
+| **自托管 / 二次开发**  | 见下方 [快速启动](#快速启动)                                                                                            |
 
 ## 环境要求
 
@@ -76,9 +82,9 @@ bun run preview
 
 ### 两种构建产物
 
-| 产物 | 命令 | 输出 | 适用场景 |
-|---|---|---|---|
-| **标准** | `bun run build` | `dist/`（多个 chunk + HTML + CSS） | HTTP 部署（GitHub Pages / Vercel / nginx / 内网 / 子路径托管均可） |
+| 产物       | 命令                   | 输出                                                          | 适用场景                                                            |
+| ---------- | ---------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **标准**   | `bun run build`        | `dist/`（多个 chunk + HTML + CSS）                            | HTTP 部署（GitHub Pages / Vercel / nginx / 内网 / 子路径托管均可）  |
 | **单文件** | `bun run build:single` | `dist-single/er-diagram-viewer.html`（~900 KB，gzip ~280 KB） | **双击即用、邮件 / U 盘分发、`file://` 离线打开**——零依赖、零服务器 |
 
 单文件模式把所有 JS / CSS / 小图标内联进一个 HTML，代价是失去 Cytoscape 的懒加载（首次解析慢一些），换来"发一个文件就能让对方用"的便利。
@@ -102,27 +108,32 @@ bunx vitest run -t "matches user_id"
 ## 使用流程
 
 1. 顶部点击 **导入 SQL**，弹窗内粘贴脚本或上传 `.sql` 文件，`⌘/Ctrl + Enter` 解析、`Esc` 关闭。
-2. 左侧 **推断的外键** 面板按置信度（高 / 中 / 低）分组列出候选 FK，每条可"接受 / 拒绝"，结果立即反映在画布上。
-3. 顶栏 **搜索** 同时匹配表名、列名以及它们的注释，命中文本会加黄色高亮底色；搜索框旁显示匹配「当前/总数」，按 `回车` 跳到下一个匹配、`Shift+回车` 上一个，画布会平移到当前命中的表。
-4. 左侧 **模块** 面板按业务模块给表分组着色，单击模块名定位画布。
-5. 左侧 **字段显示** 控制每个节点显示的密度：是否折叠、是否显示类型、是否显示列注释、是否显示索引徽标。
-6. 顶部 **导出** 菜单：
+2. 需要继续已有评审时，切换到 **导入工作区存档**，上传一个或多个 `.erreview`；加密存档会要求密码，旧版未加密存档仍可打开。
+3. 左侧 **推断的外键** 面板按置信度（高 / 中 / 低）分组列出候选 FK，每条可"接受 / 拒绝"，结果立即反映在画布上。
+4. 顶栏 **搜索** 同时匹配表名、列名以及它们的注释，命中文本会加黄色高亮底色；搜索框旁显示匹配「当前/总数」，按 `回车` 跳到下一个匹配、`Shift+回车` 上一个，画布会平移到当前命中的表。
+5. 左侧 **模块** 面板按业务模块给表分组着色，单击模块名定位画布。
+6. 左侧 **字段显示** 控制每个节点显示的密度：是否折叠、是否显示类型、是否显示列注释、是否显示索引徽标。
+7. 顶部 **导出** 菜单：
    - `PNG 图像` —— 2 倍清晰度截图
    - `SVG 矢量图` —— 适合后续编辑或打印
    - `含 FK 的 DDL` —— 在原脚本末尾追加 `ALTER TABLE ... ADD CONSTRAINT` 语句（只输出已接受 / 默认显示的推断 FK）
-7. 顶栏右侧切换 **主题**（亮色 / 暗色 / 跟随系统）与 **模块配色**。
+   - `评审报告` —— 表删除决策、字段评审意见、关系决策和回收站排除说明，以 Markdown 表格记录
+   - `数据库说明文档` —— 按标准数据库文档结构输出数据字典、主键、索引、关系和术语
+   - `工作区存档` —— 保存可继续编辑的完整评审现场，可选密码保护
+8. 顶栏右侧切换 **主题**（亮色 / 暗色 / 跟随系统）与 **模块配色**。
 
 ### 画布交互
 
-右下角悬浮控件含 撤销 / 重做、手型工具、缩放（−/百分比/＋）与视图菜单（缩放至 100% / 全览 / 缩放到选中 / 重置布局 / 全屏）。
+右下角悬浮控件含 撤销 / 重做、手型工具、缩放（−/百分比/＋）与视图菜单（缩放至 100% / 全览 / 缩放到选中 / 重置布局 / 全屏）。在画布上单击右键，可就地放大、缩小、恢复 100%、全览或显示 / 隐藏网格；`⌘/Ctrl+0` 恢复 100%，`Shift+1` 全览。
 
 - 拖拽节点 → 调整位置（多选时整组移动）；手工布局自动保存，刷新不丢
+- 编辑模式下拖动字段旁三杠 → 调整字段显示顺序；排序提示与连线触点保持一致的呼吸反馈
 - 空白处拖拽 → 框选多张表；`Shift` / `⌘` / `Ctrl` 叠加选择
 - 手型模式 / 按住 `Space` 拖拽 / 中键拖拽 → 平移画布
 - 拖拽连线线段中点（蓝点）→ 微调外键走线
 - 拖拽节点右边缘 → 手动调宽（双击该把手还原自动测算宽度）
 - 单击节点表头折叠 → 仅显示主键行
-- 滚轮 / 触控板 → 连续缩放；缩放按钮按档位（0.25→4）吸附。首次自动布局会把缩放下限锁在 1.0 以免文本变糊，「全览」可突破该下限看全图
+- 滚轮 / 触控板 → 连续缩放；缩放按钮按 `15% → 20% → 33% → 50% → 75% → 100%` 六档吸附，画布全览仍按内容自适应
 - 单击节点 → 高亮该表及其 FK 邻居；`Delete` / `Backspace` → 把选中表移入回收站；`Esc` → 清空选择
 - 单击空白 → 取消高亮
 - 撤销 / 重做 → `⌘Z` / `⌘⇧Z`（仅当前会话有效）
@@ -130,33 +141,33 @@ bunx vitest run -t "matches user_id"
 
 ## 支持的 SQL 语法
 
-| 语法 | 状态 |
-|---|---|
-| `CREATE TABLE [IF NOT EXISTS] [schema.]name (...)` | ✅ |
-| 反引号 / 双引号 / 方括号包裹的标识符 | ✅ |
-| 内联 / 表级 `PRIMARY KEY`、`UNIQUE`、`KEY` / `INDEX` | ✅ |
-| 内联 / 表级 `FOREIGN KEY ... REFERENCES` | ✅ |
-| 内联列 `REFERENCES table(col)` | ✅ |
-| `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` | ✅ |
-| `ALTER TABLE ... ADD UNIQUE / INDEX` | ✅ |
-| `CREATE [UNIQUE] INDEX ... ON ...` | ✅ |
-| MySQL 表级 `COMMENT='...'`、列内联 `COMMENT '...'` | ✅ |
-| PostgreSQL `SERIAL` / `BIGSERIAL` 自增检测 | ✅ |
-| 字符串（含 `''` 双引号转义）/ 单行 (`--`) / 块 (`/* */`) 注释跳过 | ✅ |
-| 多词类型（`DOUBLE PRECISION`、`TIMESTAMP WITH TIME ZONE` 等） | ✅ |
-| 分片表合并（`orders_0..orders_N` → `orders`） | ✅ |
-| PostgreSQL `COMMENT ON TABLE/COLUMN ... IS '...'` | ⚠️ 暂未解析，但会显式产生 warning |
-| `CREATE VIEW / TRIGGER / FUNCTION / PROCEDURE / SEQUENCE / TYPE` | ⚠️ 跳过，但会显式产生 warning |
-| `INSERT / SET / GRANT / COMMIT` 等运行时语句 | ⏭️ 静默跳过 |
+| 语法                                                              | 状态                              |
+| ----------------------------------------------------------------- | --------------------------------- |
+| `CREATE TABLE [IF NOT EXISTS] [schema.]name (...)`                | ✅                                |
+| 反引号 / 双引号 / 方括号包裹的标识符                              | ✅                                |
+| 内联 / 表级 `PRIMARY KEY`、`UNIQUE`、`KEY` / `INDEX`              | ✅                                |
+| 内联 / 表级 `FOREIGN KEY ... REFERENCES`                          | ✅                                |
+| 内联列 `REFERENCES table(col)`                                    | ✅                                |
+| `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`                  | ✅                                |
+| `ALTER TABLE ... ADD UNIQUE / INDEX`                              | ✅                                |
+| `CREATE [UNIQUE] INDEX ... ON ...`                                | ✅                                |
+| MySQL 表级 `COMMENT='...'`、列内联 `COMMENT '...'`                | ✅                                |
+| PostgreSQL `SERIAL` / `BIGSERIAL` 自增检测                        | ✅                                |
+| 字符串（含 `''` 双引号转义）/ 单行 (`--`) / 块 (`/* */`) 注释跳过 | ✅                                |
+| 多词类型（`DOUBLE PRECISION`、`TIMESTAMP WITH TIME ZONE` 等）     | ✅                                |
+| 分片表合并（`orders_0..orders_N` → `orders`）                     | ✅                                |
+| PostgreSQL `COMMENT ON TABLE/COLUMN ... IS '...'`                 | ⚠️ 暂未解析，但会显式产生 warning |
+| `CREATE VIEW / TRIGGER / FUNCTION / PROCEDURE / SEQUENCE / TYPE`  | ⚠️ 跳过，但会显式产生 warning     |
+| `INSERT / SET / GRANT / COMMIT` 等运行时语句                      | ⏭️ 静默跳过                       |
 
 左下角 / 推断面板顶部的告警条会列出 warning 行号便于排查。
 
 ## 状态持久化
 
-- 当前会话的导入 SQL、FK 决策、显示偏好与主题，以及**手工布局**（节点位置、列宽、手改连线走线、回收站里隐藏的表、画布平移/缩放视口）都保存在 **`sessionStorage`**（key: `er-viewer:state:v1`），刷新页面不会丢（连画面的相机位置都还原），**关闭标签页后清空**。
+- 当前会话的导入 SQL、FK 决策、显示偏好与主题，以及**手工布局**（节点位置、列宽、字段顺序、手改连线走线、回收站里隐藏的表、画布平移/缩放视口）都保存在 **`sessionStorage`**（key: `er-viewer:state:v1`），刷新页面不会丢（连画面的相机位置都还原），**关闭标签页后清空**。
 - 派生数据（schema / 推断结果 / 模块）与瞬时状态（搜索词、手型/选择模式、撤销重做栈）不写盘：刷新后由启动副作用从 `rawSql` 重新解析，搜索清空、模式回到「选择」。
 - 这是有意权衡：导入的 DDL 可能包含真实的生产 schema，落到 `localStorage` 会无限期停留在磁盘上。
-- 导入新 SQL 会清空手工布局（全新开始）；想跨会话保存请用导出 DDL / SVG / PNG。
+- 导入与当前 schema 有重叠的新 SQL 会保留已有布局、字段顺序和评审状态，只增量放置新增表；完全无关的 SQL 才作为新工作区重新布局。想跨会话保存请用 **工作区存档**，可选密码加密。
 
 ## 项目结构
 
@@ -167,7 +178,10 @@ bunx vitest run -t "matches user_id"
 │   └── index.html                # 产品宣传页（纯内联 CSS，GitHub Pages 根路径）
 ├── CHANGELOG.md                  # 版本变更记录
 ├── docs/
-│   └── SQL_PARSER.md             # 解析器规则与边界
+│   ├── SQL_PARSER.md             # 解析器规则与边界
+│   ├── palette-professional.md   # 沉稳配色设计与验证记录
+│   ├── roadmap.md                # 下一阶段产品与工程计划
+│   └── release-readiness.md      # 中期发版证据与准入清单
 ├── src/
 │   ├── App.tsx                   # 顶层 shell（启动副作用 + 布局骨架）
 │   ├── main.tsx                  # React 根挂载（StrictMode 故意关闭）
@@ -216,12 +230,12 @@ bunx vitest run -t "matches user_id"
 
 技术栈：**Vite 7 + React 18 + TypeScript 5 + Tailwind 3 + Cytoscape.js 3**（布局用 `@dagrejs/dagre` 分层 + 自研正交布线）**+ Zustand 4**。Vitest 3 单元测试。生产构建按 chunk 切分：
 
-| chunk | 大小（gzip） | 加载时机 |
-|---|---|---|
-| `index` (app) | ~30 KB | 首屏 |
-| `react-vendor` | ~46 KB | 首屏（与 app 并行下载） |
-| `cytoscape` | ~210 KB | 首次有 schema 渲染时按需加载 |
-| `DiagramCanvas` | ~6 KB | 同上 |
+| chunk           | 大小（gzip） | 加载时机                     |
+| --------------- | ------------ | ---------------------------- |
+| `index` (app)   | ~30 KB       | 首屏                         |
+| `react-vendor`  | ~46 KB       | 首屏（与 app 并行下载）      |
+| `cytoscape`     | ~210 KB      | 首次有 schema 渲染时按需加载 |
+| `DiagramCanvas` | ~6 KB        | 同上                         |
 
 ## 测试
 
@@ -229,26 +243,26 @@ bunx vitest run -t "matches user_id"
 bun run test
 ```
 
-当前 **24 个测试文件、204 个用例**，覆盖纯逻辑层（解析 / 推断 / 布线 / 布局 / 选择）：
+测试覆盖解析、推断、布线、布局、选择、持久化、存档、报告与说明书导出等纯逻辑层：
 
-| 模块 | 覆盖点 |
-|---|---|
-| `parser/tokenize.test.ts` | 字符串 / 注释 / `''` 双引号转义、嵌套括号匹配 |
-| `parser/parser.test.ts` | CREATE/ALTER/CREATE INDEX 解析、多词类型、未支持语句的 warning |
-| `parser/utils.test.ts` | `canonicalFkKey`、`splitQualified`、`applyIndexFlags` |
-| `infer/infer.test.ts` | 命名+类型+索引启发式、置信度档位 |
-| `infer/inferModules.test.ts` | 模块聚类与调色板分配 |
-| `infer/mergeShardedTables.test.ts` | 分片识别（数字尾号 / 哈希 / hex） + FK 重写 |
-| `diagram/routing/channelRoute.test.ts` | 正交布线：直连 / 绕行 / 侧向括号 / 线段编码 |
-| `diagram/routing/assignTracks.test.ts` | 连线分道：重合聚簇、内部段分车道、越表回退、批外边不动 |
-| `diagram/routing/routeMetrics.test.ts` | 布线质量度量：交叉数 / 重合数 |
-| `diagram/routing/updateEdgeEndpoints.test.ts` | 端点入坞 + 分道后布线的交叉/重合护栏 |
-| `diagram/routing/computeEndpointOffset.test.ts` | 端点坐标计算 |
-| `diagram/layout/arrangeForPublication.test.ts` | dagre 分层、边方向归一、孤立表不入 dagre、网格排布 |
-| `diagram/selection/closedNeighborhood.test.ts` | FK 闭邻域 |
-| `diagram/selection/marquee.test.ts` | 框选命中判定与修饰键求并 |
-| `diagram/selection/dragGroup.test.ts` | 成组拖动的成员解析 |
-| `diagram/cyHandle.test.ts` | 撤销/重做快照栈 |
+| 模块                                            | 覆盖点                                                         |
+| ----------------------------------------------- | -------------------------------------------------------------- |
+| `parser/tokenize.test.ts`                       | 字符串 / 注释 / `''` 双引号转义、嵌套括号匹配                  |
+| `parser/parser.test.ts`                         | CREATE/ALTER/CREATE INDEX 解析、多词类型、未支持语句的 warning |
+| `parser/utils.test.ts`                          | `canonicalFkKey`、`splitQualified`、`applyIndexFlags`          |
+| `infer/infer.test.ts`                           | 命名+类型+索引启发式、置信度档位                               |
+| `infer/inferModules.test.ts`                    | 模块聚类与调色板分配                                           |
+| `infer/mergeShardedTables.test.ts`              | 分片识别（数字尾号 / 哈希 / hex） + FK 重写                    |
+| `diagram/routing/channelRoute.test.ts`          | 正交布线：直连 / 绕行 / 侧向括号 / 线段编码                    |
+| `diagram/routing/assignTracks.test.ts`          | 连线分道：重合聚簇、内部段分车道、越表回退、批外边不动         |
+| `diagram/routing/routeMetrics.test.ts`          | 布线质量度量：交叉数 / 重合数                                  |
+| `diagram/routing/updateEdgeEndpoints.test.ts`   | 端点入坞 + 分道后布线的交叉/重合护栏                           |
+| `diagram/routing/computeEndpointOffset.test.ts` | 端点坐标计算                                                   |
+| `diagram/layout/arrangeForPublication.test.ts`  | dagre 分层、边方向归一、孤立表不入 dagre、网格排布             |
+| `diagram/selection/closedNeighborhood.test.ts`  | FK 闭邻域                                                      |
+| `diagram/selection/marquee.test.ts`             | 框选命中判定与修饰键求并                                       |
+| `diagram/selection/dragGroup.test.ts`           | 成组拖动的成员解析                                             |
+| `diagram/cyHandle.test.ts`                      | 撤销/重做快照栈                                                |
 
 改解析、推断、布线或布局规则时请同步加 / 改测试。UI 组件层目前**没有**自动化测试，端到端依赖人工跑 `bun run preview` 验证。测试文件与源码 colocate（同目录）。
 
@@ -262,16 +276,20 @@ bun run test
 首次启用 Pages：仓库 **Settings → Pages → Source 选 "GitHub Actions"**，然后随便 push 一次 main 触发 workflow。
 
 部署完成后：
+
 - 🌐 SPA：`https://lifefitting.github.io/er-diagram-viewer/app/`
 - 📖 Landing：`https://lifefitting.github.io/er-diagram-viewer/`
 
 ## 文档
 
-| 文档 | 主题 |
-| --- | --- |
-| [docs/SQL_PARSER.md](docs/SQL_PARSER.md) | 解析器规则、支持/不支持的语法边界 |
-| [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
-| [CLAUDE.md](CLAUDE.md) | 架构总览、协作约定、踩坑记录、设计权衡 |
+| 文档                                                         | 主题                                   |
+| ------------------------------------------------------------ | -------------------------------------- |
+| [docs/SQL_PARSER.md](docs/SQL_PARSER.md)                     | 解析器规则、支持/不支持的语法边界      |
+| [docs/release-readiness.md](docs/release-readiness.md)       | 中期发版证据、冒烟场景与准入条件       |
+| [docs/roadmap.md](docs/roadmap.md)                           | 下一阶段产品与工程计划                 |
+| [docs/palette-professional.md](docs/palette-professional.md) | 沉稳模块配色的设计约束与验证数据       |
+| [CHANGELOG.md](CHANGELOG.md)                                 | 版本变更记录                           |
+| [CLAUDE.md](CLAUDE.md)                                       | 架构总览、协作约定、踩坑记录、设计权衡 |
 
 ## 已知限制 / 后续
 

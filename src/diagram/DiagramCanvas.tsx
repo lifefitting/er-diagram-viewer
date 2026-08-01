@@ -52,6 +52,7 @@ import {
 } from './selection/marquee';
 import { TrashIcon } from '../ui/overlays/icons';
 import { useResolvedTheme } from '../ui/theme/useApplyTheme';
+import { nextZoomStop } from './zoom';
 
 /**
  * On the dark canvas, dark palette edge colors (mono, earth, darker vibrant)
@@ -170,6 +171,7 @@ export function DiagramCanvas() {
   const toggleCollapsed = useApp((s) => s.toggleCollapsed);
   const setTableWidth = useApp((s) => s.setTableWidth);
   const setTableWidths = useApp((s) => s.setTableWidths);
+  const setColumnOrder = useApp((s) => s.setColumnOrder);
   const canvasMode = useApp((s) => s.canvasMode);
   const deletedTables = useApp((s) => s.deletedTables);
   // NB: `manualRoutes` is intentionally NOT subscribed here — nothing in render
@@ -605,7 +607,7 @@ export function DiagramCanvas() {
       style: buildStylesheet(),
       wheelSensitivity: 0.2,
       minZoom: 0.15,
-      maxZoom: 4,
+      maxZoom: 1,
       boxSelectionEnabled: false,
       // Empty-canvas drag is reserved for marquee selection (handled by our own
       // mousedown below), so cytoscape's drag-to-pan is off. Wheel input is
@@ -646,6 +648,11 @@ export function DiagramCanvas() {
     const fitImpl = () => cy.fit(undefined, 60);
     const resetZoomImpl = () =>
       cy.zoom({ level: 1, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+    const zoomStepImpl = (direction: 1 | -1) =>
+      cy.zoom({
+        level: nextZoomStop(cy.zoom(), direction),
+        renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
+      });
     const zoomToSelectionImpl = () => {
       const ids = selectedIdsRef.current;
       if (ids.size === 0) return; // no-op when nothing is multi-selected
@@ -719,6 +726,7 @@ export function DiagramCanvas() {
       relayout,
       fit: fitImpl,
       resetZoom: resetZoomImpl,
+      zoomStep: zoomStepImpl,
       zoomToSelection: zoomToSelectionImpl,
       fitNodes: fitNodesImpl,
       centerOnNode: centerOnNodeImpl,
@@ -1840,7 +1848,7 @@ export function DiagramCanvas() {
     <div className={`relative h-full w-full ${connectDrag ? 'cy-cursor-connecting' : ''}`}>
       <div
         ref={containerRef}
-        className={`cy-container absolute inset-0 ${canvasCursor}`}
+        className={`cy-container absolute inset-0 ${display.showGrid ? '' : 'cy-grid-hidden'} ${canvasCursor}`}
         onMouseDown={onCanvasMouseDown}
       />
       {/* Self-loop layer: cytoscape can't render loop edges with the segments
@@ -1975,6 +1983,7 @@ export function DiagramCanvas() {
             onConnectStart={(col, side, e) => onConnectStart(p.table.name, col, side, e)}
             noteColumns={noteColumnsByTable.get(p.table.name)}
             onOpenNote={(col, e) => onOpenNote(p.table.name, col, e)}
+            onReorderColumns={(columns) => setColumnOrder(p.table.name, columns)}
           />
         );
       })}
