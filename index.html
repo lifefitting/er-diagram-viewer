@@ -184,6 +184,10 @@
         transition: opacity 0.2s ease-out;
         visibility: hidden;
       }
+      #root:not(:empty) + .app-skeleton .app-skeleton__title,
+      #root:not(:empty) + .app-skeleton .app-skeleton__spinner {
+        animation: none;
+      }
       /* Dark-mode skeleton. Honors the OS preference at first paint only —
          the React app may override later via the explicit theme picker, but
          until it does we shouldn't flash white at OS-dark users.

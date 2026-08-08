@@ -28,11 +28,14 @@ import {
 } from './cyHandle';
 import type { NodePos, OverlayState, Selection } from './types';
 import { TableOverlay } from './overlay/TableOverlay';
+import { applyOverlayGeometry } from './overlay/overlayGeometry';
+import { InteractionFpsHud, type InteractionFpsHudHandle } from './overlay/InteractionFpsHud';
 import { RouteHandles } from './overlay/RouteHandles';
 import { runLayout } from './layout/runLayout';
 import { placeIncrementalNodes } from './layout/incrementalLayout';
 import { clampPanAxis } from './clampPan';
 import { updateEdgeEndpoints } from './routing/updateEdgeEndpoints';
+import { nodeInfluenceRect, routeMayBeAffected } from './routing/affectedRoutes';
 import {
   dragSegment,
   segmentsFromPoints,
@@ -53,6 +56,7 @@ import {
 import { TrashIcon } from '../ui/overlays/icons';
 import { useResolvedTheme } from '../ui/theme/useApplyTheme';
 import { nextZoomStop } from './zoom';
+import { reconcileElements } from './reconcileElements';
 
 /**
  * On the dark canvas, dark palette edge colors (mono, earth, darker vibrant)
@@ -75,6 +79,18 @@ function applyEdgeTheme(cy: Core, isDark: boolean): void {
       }
     });
   });
+}
+
+/** Stable prop identity with live behavior, so memoized overlays never retain
+ * a stale selection or store closure. */
+function useLatestCallback<T extends (...args: never[]) => unknown>(callback: T): T {
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
+  const stableRef = useRef<T>();
+  if (!stableRef.current) {
+    stableRef.current = ((...args: Parameters<T>) => callbackRef.current(...args)) as T;
+  }
+  return stableRef.current;
 }
 
 /**
@@ -152,6 +168,7 @@ function clampPan(cy: Core, pan: { x: number; y: number }): { x: number; y: numb
 export function DiagramCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
+  const fpsHudRef = useRef<InteractionFpsHudHandle | null>(null);
 
   const rawSchema = useApp((s) => s.schema);
   const inferred = useApp((s) => s.inferred);
@@ -187,6 +204,22 @@ export function DiagramCanvas() {
   const schema = useMemo(() => visibleSchema(rawSchema, deletedTables), [rawSchema, deletedTables]);
 
   const [positions, setPositions] = useState<NodePos[]>([]);
+  // React owns low-frequency table CONTENT. Camera/drag geometry is mirrored
+  // into refs and written to the registered roots once per animation frame.
+  const positionsRef = useRef<NodePos[]>([]);
+  const overlayElementsRef = useRef(new Map<string, HTMLDivElement>());
+  const overlayGeometryRef = useRef(new Map<string, Pick<NodePos, 'x' | 'y' | 'w' | 'h'>>());
+  const syncOverlaysRef = useRef<((publishModels?: boolean) => void) | null>(null);
+  const [positionRevision, setPositionRevision] = useState(0);
+  const registerOverlayElement = useCallback((id: string, element: HTMLDivElement | null) => {
+    if (!element) {
+      overlayElementsRef.current.delete(id);
+      return;
+    }
+    overlayElementsRef.current.set(id, element);
+    const geometry = overlayGeometryRef.current.get(id);
+    if (geometry) applyOverlayGeometry(element, geometry);
+  }, []);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   // Explicit multi-select group for manual layout: the set of cards that drag
@@ -459,7 +492,7 @@ export function DiagramCanvas() {
         return next.size === prev.size ? prev : next;
       });
     }
-  }, [selectedEdges, positions]);
+  }, [selectedEdges, positionRevision]);
 
   /** Row click → open the review-note bubble anchored under that row. */
   const onOpenNote = (table: string, col: string, e: React.MouseEvent) => {
@@ -530,7 +563,7 @@ export function DiagramCanvas() {
       });
     }
     setSearchMatches(ids);
-  }, [searchSelection, setSearchMatches, positions]);
+  }, [searchSelection, setSearchMatches, positionRevision]);
 
   // Follow the active match: pan (keeping zoom) so it's centered. Only fires
   // once the user steps into the results (Enter / nav buttons → index ≥ 0), so
@@ -738,8 +771,21 @@ export function DiagramCanvas() {
     });
     bindHistory(applySnapshot, (u, r) => useApp.getState().setHistoryFlags(u, r));
 
-    const syncPositions = () => {
+    const syncNodeGeometry = (ids: Iterable<string>) => {
+      for (const id of ids) {
+        const node = cy.getElementById(id);
+        if (node.empty()) continue;
+        const bb = node.renderedBoundingBox({ includeLabels: false });
+        const geometry = { x: bb.x1, y: bb.y1, w: bb.w, h: bb.h };
+        overlayGeometryRef.current.set(id, geometry);
+        const element = overlayElementsRef.current.get(id);
+        if (element) applyOverlayGeometry(element, geometry);
+      }
+    };
+
+    const syncPositions = (publishModels = false) => {
       const pos: NodePos[] = [];
+      const liveIds = new Set<string>();
       cy.nodes().forEach((n) => {
         const bb = n.renderedBoundingBox({ includeLabels: false });
         const t = tableByIdRef.current.get(n.id());
@@ -747,7 +793,7 @@ export function DiagramCanvas() {
         const mods = modulesRef.current;
         const moduleColor = colorForTableModule(t.name, mods.byTable, mods.modules);
         const moduleKey = mods.byTable.get(t.name) ?? '';
-        pos.push({
+        const next = {
           id: n.id(),
           table: t,
           x: bb.x1,
@@ -756,16 +802,39 @@ export function DiagramCanvas() {
           h: bb.h,
           moduleColor,
           moduleKey,
-        });
+        };
+        pos.push(next);
+        liveIds.add(next.id);
+        const geometry = { x: next.x, y: next.y, w: next.w, h: next.h };
+        overlayGeometryRef.current.set(next.id, geometry);
+        const element = overlayElementsRef.current.get(next.id);
+        if (element) applyOverlayGeometry(element, geometry);
       });
-      setPositions(pos);
+      for (const id of overlayGeometryRef.current.keys()) {
+        if (!liveIds.has(id)) overlayGeometryRef.current.delete(id);
+      }
+      positionsRef.current = pos;
+      if (publishModels) setPositions(pos);
     };
-    // Infrequent events sync synchronously (immediate, responsive): pan/zoom
-    // (overlays must track the camera with no lag), container resize, fresh
-    // layout, and element add/remove.
-    cy.on('pan zoom resize', syncPositions);
-    cy.on('layoutstop', syncPositions);
-    cy.on('add remove', syncPositions);
+    syncOverlaysRef.current = syncPositions;
+    let geometryRafId: number | undefined;
+    const scheduleGeometry = () => {
+      if (geometryRafId !== undefined) return;
+      geometryRafId = requestAnimationFrame((timestamp) => {
+        geometryRafId = undefined;
+        if (!cy.destroyed()) {
+          syncPositions(false);
+          fpsHudRef.current?.frame(timestamp);
+        }
+      });
+    };
+    // Camera changes only mutate registered root styles. No table/column React
+    // subtree is reconciled while the user pans, zooms, drags or resizes.
+    cy.on('pan zoom resize', scheduleGeometry);
+    cy.on('layoutstop', () => {
+      scheduleGeometry();
+      setPositionRevision((revision) => revision + 1);
+    });
     // Persist the camera on any pan/zoom (not resize — a container resize must
     // not rewrite the stored camera).
     cy.on('pan zoom', saveViewport);
@@ -777,10 +846,12 @@ export function DiagramCanvas() {
     // obstacle map once), instead of k of each.
     let posRafId: number | undefined;
     let pendingEdges: EdgeCollection | null = null;
-    const flushDrag = () => {
+    const pendingNodeIds = new Set<string>();
+    const flushDrag = (timestamp: number) => {
       posRafId = undefined;
       if (cy.destroyed()) return;
-      syncPositions();
+      syncNodeGeometry(pendingNodeIds);
+      pendingNodeIds.clear();
       if (pendingEdges && pendingEdges.length > 0) {
         updateEdgeEndpoints(
           cy,
@@ -794,11 +865,14 @@ export function DiagramCanvas() {
           // path (whose port side would flip as the card center crosses the old
           // port-x). Cleared on mouseup, which then clears the moved overrides.
           nodeDraggingRef.current ? {} : useApp.getState().manualRoutes,
+          { quality: nodeDraggingRef.current ? 'preview' : 'full' },
         );
       }
       pendingEdges = null;
+      fpsHudRef.current?.frame(timestamp);
     };
     cy.on('position', 'node', (evt) => {
+      pendingNodeIds.add(evt.target.id());
       const inc = evt.target.connectedEdges();
       pendingEdges = pendingEdges ? pendingEdges.union(inc) : inc;
       if (posRafId === undefined) posRafId = requestAnimationFrame(flushDrag);
@@ -806,7 +880,7 @@ export function DiagramCanvas() {
     // Fresh layout / nodes added: reroute every edge once (synchronous — these
     // are one-shot, infrequent events, and deferring would flash stale routes
     // for a frame after 重置布局).
-    cy.on('layoutstop add', () => {
+    cy.on('layoutstop', () => {
       updateEdgeEndpoints(
         cy,
         cy.edges(),
@@ -930,6 +1004,8 @@ export function DiagramCanvas() {
       [...cleanups].forEach((fn) => fn());
       // Cancel a pending drag-flush rAF so it can't fire against the destroyed cy.
       if (posRafId !== undefined) cancelAnimationFrame(posRafId);
+      if (geometryRafId !== undefined) cancelAnimationFrame(geometryRafId);
+      syncOverlaysRef.current = null;
       wheelTarget.removeEventListener('wheel', onWheel);
       if (saveTimer !== undefined) clearTimeout(saveTimer);
       // Cancel a pending hide-handles timer too, so its setHoveredEdgeId(null)
@@ -1017,21 +1093,18 @@ export function DiagramCanvas() {
     };
   }, []);
 
-  // Rebuild elements when schema / fks / modules change. Preserves user-dragged
-  // positions by capturing positions before remove and restoring them after add.
+  // Incrementally reconcile graph elements when schema / fks / modules change.
+  // Stable ids retain their Cytoscape instance, position and runtime route data.
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
     if (!schema) {
       cy.elements().remove();
+      positionsRef.current = [];
+      overlayGeometryRef.current.clear();
       setPositions([]);
       return;
     }
-    const prevPositions = new Map<string, { x: number; y: number }>();
-    cy.nodes().forEach((n) => {
-      prevPositions.set(n.id(), { ...n.position() });
-    });
-
     const { elements } = buildElements(schema, effectiveFks, {
       modules,
       collapsed,
@@ -1039,8 +1112,9 @@ export function DiagramCanvas() {
       display,
       decisions,
     });
-    cy.elements().remove();
-    cy.add(elements);
+    const saved = useApp.getState().nodePositions;
+    const freshImport = Object.keys(saved).length === 0 && cy.nodes().length > 0;
+    const reconciled = reconcileElements(cy, elements, freshImport);
 
     // Drop any multi-select members whose table no longer exists, so a removed
     // table can't leave a phantom sky ring. Returns the same Set when unchanged
@@ -1070,11 +1144,10 @@ export function DiagramCanvas() {
     // imported — discard the stale in-session positions too, or surviving
     // tables get pinned in place and previously-deleted tables (absent from
     // both maps) pile up in the `maxX + 220` stack below.
-    const saved = useApp.getState().nodePositions;
-    const freshImport = Object.keys(saved).length === 0;
     const newlyAdded: cytoscape.NodeSingular[] = [];
     cy.nodes().forEach((n) => {
-      const p = freshImport ? undefined : (prevPositions.get(n.id()) ?? saved[n.id()]);
+      if (!reconciled.addedNodeIds.has(n.id())) return;
+      const p = freshImport ? undefined : saved[n.id()];
       if (p) n.position(p);
       else newlyAdded.push(n);
     });
@@ -1166,6 +1239,8 @@ export function DiagramCanvas() {
       manualMoveRef.current,
       useApp.getState().manualRoutes,
     );
+    syncOverlaysRef.current?.(true);
+    setPositionRevision((revision) => revision + 1);
     // Color the freshly-built edges for the current theme (no flash of the
     // light/invisible color before the theme effect below would run).
     applyEdgeTheme(cy, isDarkRef.current);
@@ -1344,7 +1419,12 @@ export function DiagramCanvas() {
     const starts = groupIds
       .map((gid) => cy.getElementById(gid))
       .filter((n) => n && !n.empty())
-      .map((n) => ({ node: n, start: { ...n.position() } }));
+      .map((n) => ({
+        node: n,
+        start: { ...n.position() },
+        width: (n.data('boxWidth') as number) ?? 240,
+        height: (n.data('boxHeight') as number) ?? 80,
+      }));
 
     // Candidate group deltas that would align one moved field port exactly
     // with a stationary peer. Internal group edges are excluded because both
@@ -1388,6 +1468,7 @@ export function DiagramCanvas() {
       }
       if (!moved && Math.abs(screenDx) + Math.abs(screenDy) > 3) {
         moved = true;
+        fpsHudRef.current?.start('table');
         // First real movement → route edges live (detour from current ports)
         // for the rest of this session, until a relayout re-canonicalises.
         manualMoveRef.current = true;
@@ -1417,6 +1498,7 @@ export function DiagramCanvas() {
         }
         return;
       }
+      fpsHudRef.current?.stop();
       // Moving a node tears its connector ports away from any hand-edited bends,
       // so drop the overrides for every edge touching a moved card — those edges
       // re-auto-route. (Only here + onTableResize; never on the cy 'position'
@@ -1427,17 +1509,29 @@ export function DiagramCanvas() {
         );
         if (movedFkKeys.length) useApp.getState().clearManualRoutesForNode(movedFkKeys);
       }
-      // A real move. Routing is obstacle-aware (edges thread around ALL cards,
-      // not just their endpoints), so moving cards can invalidate routes that
-      // don't touch them; re-route every edge so they clean up around the new
-      // positions. `liveRoute` (manualMoveRef) makes multi-rank/blocked edges
-      // run the obstacle-avoiding detour from the current ports instead of the
-      // frozen dagre channel, so a card dragged into a gutter no longer leaves a
-      // stale crossing. Read routes fresh (getState) so the just-cleared ones
-      // don't re-dock this pass.
+      // Refine incident edges plus routes whose current bounds overlap the old
+      // or new card neighborhood. This catches both newly blocked and newly
+      // unblocked lanes without paying for an unconditional whole-graph pass.
+      // Large affected sets deliberately fall back to the full pass.
+      const influenceAreas = starts.flatMap((start) => [
+        nodeInfluenceRect(start.start, start.width, start.height),
+        nodeInfluenceRect(start.node.position(), start.width, start.height),
+      ]);
+      const incidentIds = new Set(
+        starts.flatMap((start) => start.node.connectedEdges().map((edge) => edge.id())),
+      );
+      const affected = cy.edges().filter((edge) => {
+        if (incidentIds.has(edge.id())) return true;
+        return routeMayBeAffected(
+          routeToPoints(edge.data('routePoints') as string | undefined),
+          influenceAreas,
+        );
+      });
+      const finalEdges =
+        starts.length > 20 || affected.length > cy.edges().length * 0.6 ? cy.edges() : affected;
       updateEdgeEndpoints(
         cy,
-        cy.edges(),
+        finalEdges,
         collapsedRef.current,
         tableByIdRef.current,
         displayRef.current,
@@ -1451,6 +1545,7 @@ export function DiagramCanvas() {
         pushHistory(snap);
         useApp.getState().setNodePositions(snap.positions);
       }
+      setPositionRevision((revision) => revision + 1);
       // A plain drag of an unselected card shouldn't leave a stale group.
       if (!additive && !(sel.has(id) && sel.size > 1)) setSelectedIds(new Set([id]));
     };
@@ -1494,6 +1589,7 @@ export function DiagramCanvas() {
         displayRef.current,
         manualMoveRef.current,
         useApp.getState().manualRoutes,
+        { quality: 'preview' },
       );
     };
     const onUp = () => {
@@ -1538,8 +1634,16 @@ export function DiagramCanvas() {
       // capturing it directly would make `startPan.x` mutate as we pan and the
       // delta accumulate (the drag would fly off-screen). Spread to snapshot it.
       const startPan = { ...cy.pan() };
+      let fpsStarted = false;
       setPanning(true);
       const onMove = (mv: MouseEvent) => {
+        if (
+          !fpsStarted &&
+          Math.abs(mv.clientX - startClient.x) + Math.abs(mv.clientY - startClient.y) > 3
+        ) {
+          fpsStarted = true;
+          fpsHudRef.current?.start('pan');
+        }
         cy.pan(
           clampPan(cy, {
             x: startPan.x + (mv.clientX - startClient.x),
@@ -1548,6 +1652,7 @@ export function DiagramCanvas() {
         );
       };
       const onUp = () => {
+        if (fpsStarted) fpsHudRef.current?.stop();
         setPanning(false);
       };
       beginDrag(onMove, onUp);
@@ -1564,7 +1669,10 @@ export function DiagramCanvas() {
     const baseEdges = additive ? new Map(selectedEdgesRef.current) : new Map<string, string>();
     // `positions` is stable for the duration of a marquee (no pan/zoom/node move
     // happens while the button is down), so the captured array is safe to read.
-    const snapshot = positions;
+    const snapshot = positionsRef.current.map((position) => ({
+      ...position,
+      ...(overlayGeometryRef.current.get(position.id) ?? {}),
+    }));
     // Manual edges snapshotted as viewport-space polylines — the marquee
     // rubber-bands them with the SAME touch-= -selected semantics as cards.
     const pan = cy.pan();
@@ -1834,6 +1942,14 @@ export function DiagramCanvas() {
     beginDrag(onMove, onUp);
   };
 
+  const overlayDragStart = useLatestCallback(onTableDragStart);
+  const overlayResizeStart = useLatestCallback(onTableResize);
+  const overlayOpenNote = useLatestCallback(onOpenNote);
+  const overlayConnectStart = useLatestCallback(onConnectStart);
+  const overlayResetWidth = useLatestCallback((tableName: string) =>
+    setTableWidth(tableName, null),
+  );
+
   // Dedicated classes (not Tailwind's `cursor-*`) because cytoscape writes an
   // inline cursor on its container/canvas during interaction; only an
   // !important rule (see styles.css) wins over that. SELECT mode keeps the
@@ -1846,6 +1962,7 @@ export function DiagramCanvas() {
 
   return (
     <div className={`relative h-full w-full ${connectDrag ? 'cy-cursor-connecting' : ''}`}>
+      <InteractionFpsHud ref={fpsHudRef} />
       <div
         ref={containerRef}
         className={`cy-container absolute inset-0 ${display.showGrid ? '' : 'cy-grid-hidden'} ${canvasCursor}`}
@@ -1976,14 +2093,15 @@ export function DiagramCanvas() {
             interactive={canvasMode === 'select'}
             query={search}
             searchScope={searchScope}
-            onDragHandle={(e) => onTableDragStart(e, p.id)}
-            onResizeHandle={(e) => onTableResize(e, p.table.name, p.id)}
-            onToggleCollapse={() => toggleCollapsed(p.table.name)}
-            onResetWidth={() => setTableWidth(p.table.name, null)}
-            onConnectStart={(col, side, e) => onConnectStart(p.table.name, col, side, e)}
+            registerElement={registerOverlayElement}
+            onDragHandle={overlayDragStart}
+            onResizeHandle={overlayResizeStart}
+            onToggleCollapse={toggleCollapsed}
+            onResetWidth={overlayResetWidth}
+            onConnectStart={overlayConnectStart}
             noteColumns={noteColumnsByTable.get(p.table.name)}
-            onOpenNote={(col, e) => onOpenNote(p.table.name, col, e)}
-            onReorderColumns={(columns) => setColumnOrder(p.table.name, columns)}
+            onOpenNote={overlayOpenNote}
+            onReorderColumns={setColumnOrder}
           />
         );
       })}

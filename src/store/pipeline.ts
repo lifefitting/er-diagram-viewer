@@ -7,6 +7,7 @@ import { inferModules, type ModulesResult, type PaletteName } from '../infer/inf
 import { mergeShardedTables } from '../infer/mergeShardedTables';
 import { nodeId } from '../diagram/nodeId';
 import type { WorkspaceGroup } from './types';
+import { measureRuntimeStage } from '../performance/runtimeMeasure';
 
 export const EMPTY_MODULES: ModulesResult = { byTable: new Map(), modules: new Map(), ordered: [] };
 
@@ -207,8 +208,64 @@ export function runPipeline(
   workspaceGroups: readonly WorkspaceGroup[] = [],
   moduleOverrides: Readonly<Record<string, string>> = {},
 ): { schema: Schema; inferred: InferredFK[]; modules: ModulesResult } {
-  const rawSchema = parseSql(sql);
-  const merged = mergeShardedTables(rawSchema).schema;
+  return derivePipeline(
+    parseAndMergeSql(sql),
+    palette,
+    logicalKeys,
+    workspaceGroups,
+    moduleOverrides,
+  );
+}
+
+/**
+ * Parse + shard-merge is the expensive, settings-independent half of the
+ * pipeline. A tiny in-memory LRU avoids reparsing the same editor/archive SQL
+ * during preflight, reconciliation and refresh. Parsed schemas are immutable
+ * derivation inputs; this cache is runtime-only and never enters persistence or
+ * the `.erreview` archive payload.
+ */
+const PARSE_CACHE_LIMIT = 3;
+const parseCache = new Map<string, Schema>();
+
+export function parseAndMergeSql(sql: string): Schema {
+  const cached = parseCache.get(sql);
+  if (cached) {
+    parseCache.delete(sql);
+    parseCache.set(sql, cached);
+    return cached;
+  }
+  const merged = measureRuntimeStage(
+    'er:pipeline:parse-merge',
+    () => mergeShardedTables(parseSql(sql)).schema,
+  );
+  parseCache.set(sql, merged);
+  if (parseCache.size > PARSE_CACHE_LIMIT) {
+    const oldest = parseCache.keys().next().value as string | undefined;
+    if (oldest !== undefined) parseCache.delete(oldest);
+  }
+  return merged;
+}
+
+/** Settings-dependent derivation from an already parsed, shard-merged schema. */
+export function derivePipeline(
+  merged: Schema,
+  palette: PaletteName,
+  logicalKeys: readonly string[] = [],
+  workspaceGroups: readonly WorkspaceGroup[] = [],
+  moduleOverrides: Readonly<Record<string, string>> = {},
+): { schema: Schema; inferred: InferredFK[]; modules: ModulesResult } {
+  return measureRuntimeStage('er:pipeline:derive', () =>
+    derivePipelineUnmeasured(merged, palette, logicalKeys, workspaceGroups, moduleOverrides),
+  );
+}
+
+function derivePipelineUnmeasured(
+  merged: Schema,
+  palette: PaletteName,
+  logicalKeys: readonly string[],
+  workspaceGroups: readonly WorkspaceGroup[],
+  moduleOverrides: Readonly<Record<string, string>>,
+): { schema: Schema; inferred: InferredFK[]; modules: ModulesResult } {
   let inferredFk: InferredFK[];
   if (workspaceGroups.length === 0) {
     inferredFk = inferForeignKeys(merged);

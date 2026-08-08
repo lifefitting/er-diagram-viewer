@@ -25,6 +25,7 @@ export function TableHeader({
   const shardInfo = table.shardInfo;
   return (
     <div
+      data-table-drag-handle=""
       className="flex items-center gap-1.5 text-[13px] font-semibold px-2 cursor-grab active:cursor-grabbing"
       style={{
         background: moduleColor.header,

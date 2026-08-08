@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Current release baseline: `0.3.5` (2026-08-01). Release evidence and the next-version
+Current release baseline: `0.3.6` (2026-08-08). Release evidence and the next-version
 entry criteria live in [docs/release-readiness.md](docs/release-readiness.md).
 
 ## Project

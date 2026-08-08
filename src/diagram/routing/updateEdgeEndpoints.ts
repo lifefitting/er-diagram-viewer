@@ -19,6 +19,8 @@ import {
 } from './channelRoute';
 import { assignTracks, type TrackRoute } from './assignTracks';
 import { countCrossings, countOverlaps } from './routeMetrics';
+import { buildObstacleGrid, queryObstacleGrid } from './obstacleGrid';
+import { startRuntimeMeasure } from '../../performance/runtimeMeasure';
 
 /** Minimum vertical port offset for the stacked/bracket treatment to apply. */
 const VERTICAL_OFFSET = 24;
@@ -26,6 +28,15 @@ const VERTICAL_OFFSET = 24;
 const SIDE_MARGIN = 30;
 
 const EPS = 0.5;
+
+export interface UpdateRoutingOptions {
+  /** Interactive preview skips global lane assignment and searches a local
+   * obstacle grid. Mouseup/layout/export use the default full-quality pass. */
+  quality?: 'preview' | 'full';
+}
+
+const offsetCache = new WeakMap<Table, Map<string, number[]>>();
+const routeCache = new WeakMap<Core, Map<string, Pt[]>>();
 
 /** One computed-but-not-yet-written route. */
 export interface RouteEntry {
@@ -123,20 +134,30 @@ export function updateEdgeEndpoints(
   display: DisplayOptions,
   liveRoute = false,
   manualRoutes: Record<string, Pt[]> = {},
+  options: UpdateRoutingOptions = {},
 ): void {
   if (edges.length === 0) return;
-  // Memoize per-table row offsets — many edges share endpoints on the same node.
-  const offsetsCache = new Map<string, number[]>();
+  const quality = options.quality ?? 'full';
+  // Preview runs every animation frame; do not accumulate PerformanceEntry
+  // objects for it. The full pass is the Worker decision point we need to time.
+  const finishMeasure = quality === 'full' ? startRuntimeMeasure('er:routing:full') : () => {};
+  const displayKey = `${Number(display.showComment)}${Number(display.showType)}${Number(display.onlyPk)}`;
+  // Memoize immutable per-table row offsets across route passes.
   const rowOffsets = (table: Table | undefined): number[] => {
     if (!table) return [];
-    const cached = offsetsCache.get(table.name);
+    let byDisplay = offsetCache.get(table);
+    if (!byDisplay) {
+      byDisplay = new Map();
+      offsetCache.set(table, byDisplay);
+    }
+    const cached = byDisplay.get(displayKey);
     if (cached) return cached;
     const arr = columnRowOffsets(table, {
       showComment: display.showComment,
       showType: display.showType,
       onlyPk: display.onlyPk,
     });
-    offsetsCache.set(table.name, arr);
+    byDisplay.set(displayKey, arr);
     return arr;
   };
   // Card rectangles for obstacle-aware direct routing. Built once; the endpoint
@@ -157,6 +178,7 @@ export function updateEdgeEndpoints(
       y2: p.y + h / 2 - INSET,
     });
   });
+  const obstacleGrid = quality === 'preview' ? buildObstacleGrid(rectById) : null;
 
   // ---- collect phase: route every edge independently --------------------
   const writes: Array<{ e: EdgeSingular; entry: RouteEntry; obstacles: Rect[] | null }> = [];
@@ -215,7 +237,17 @@ export function updateEdgeEndpoints(
         { x: tx, y: ty },
       ];
     } else {
-      const obstacles = buildObstacles(rectById, src.id(), tgt.id());
+      const srcRect = rectById.get(src.id());
+      const tgtRect = rectById.get(tgt.id());
+      const previewBounds = {
+        x1: Math.min(srcRect?.x1 ?? srcPos.x, tgtRect?.x1 ?? tgtPos.x) - 160,
+        y1: Math.min(srcRect?.y1 ?? srcPos.y, tgtRect?.y1 ?? tgtPos.y) - 160,
+        x2: Math.max(srcRect?.x2 ?? srcPos.x, tgtRect?.x2 ?? tgtPos.x) + 160,
+        y2: Math.max(srcRect?.y2 ?? srcPos.y, tgtRect?.y2 ?? tgtPos.y) + 160,
+      };
+      const obstacles = obstacleGrid
+        ? queryObstacleGrid(obstacleGrid, previewBounds, new Set([src.id(), tgt.id()]))
+        : buildObstacles(rectById, src.id(), tgt.id());
       obstaclesUsed = obstacles;
       // Field-row port Y is the same whichever side we dock to.
       const sy = srcPos.y + computeEndpointOffset(srcY, srcCollapsed, srcW, srcH, 'left').y;
@@ -314,7 +346,12 @@ export function updateEdgeEndpoints(
               srcDir: srcSide === 'right' ? 1 : -1,
               tgtDir: tgtSide === 'right' ? 1 : -1,
             });
-            pts = detour ?? orthogonalize([{ x: sx, y: sy }, { x: tx, y: ty }]);
+            pts =
+              detour ??
+              orthogonalize([
+                { x: sx, y: sy },
+                { x: tx, y: ty },
+              ]);
           } else {
             // Static (layout/export) pass: dock to dagre's channel waypoints.
             const waypoints = (e.data('dagreWaypoints') as Pt[] | undefined) ?? [];
@@ -344,25 +381,30 @@ export function updateEdgeEndpoints(
   });
   const fixedContext: TrackRoute[] = [];
   const isFullPass = updatedIds.size >= cy.edges().length;
-  if (!isFullPass) {
+  const cachedRoutes = routeCache.get(cy) ?? new Map<string, Pt[]>();
+  routeCache.set(cy, cachedRoutes);
+  if (quality === 'full' && !isFullPass) {
     cy.edges().forEach((o) => {
       if (updatedIds.has(o.id())) return;
-      const pts = routeToPoints(o.data('routePoints') as string | undefined);
+      const pts =
+        cachedRoutes.get(o.id()) ?? routeToPoints(o.data('routePoints') as string | undefined);
       if (pts.length >= 2) fixedContext.push({ pts, movable: false });
     });
   }
-  assignTracks([
-    ...writes.map(({ entry, obstacles }) => ({
-      pts: entry.pts,
-      movable: entry.movable,
-      obstacles: entry.movable && obstacles ? obstacles : undefined,
-    })),
-    ...fixedContext,
-  ]);
+  if (quality === 'full') {
+    assignTracks([
+      ...writes.map(({ entry, obstacles }) => ({
+        pts: entry.pts,
+        movable: entry.movable,
+        obstacles: entry.movable && obstacles ? obstacles : undefined,
+      })),
+      ...fixedContext,
+    ]);
+  }
 
   // Layout-quality telemetry for dev sessions; full passes only so the drag
   // hot path (partial, per-frame) never pays for it. Zero cost in prod builds.
-  if (import.meta.env.DEV && isFullPass) {
+  if (import.meta.env.DEV && quality === 'full' && isFullPass) {
     const routes = entries.map((en) => en.pts);
     console.debug(
       `[routing] edges=${routes.length} crossings=${countCrossings(routes)} overlaps=${countOverlaps(routes)}`,
@@ -373,11 +415,21 @@ export function updateEdgeEndpoints(
   cy.batch(() => {
     for (const { e, entry } of writes) {
       const { weights, distances } = segmentsFromPoints(entry.pts);
-      e.data('srcEndpoint', formatEndpoint(entry.srcOff));
-      e.data('tgtEndpoint', formatEndpoint(entry.tgtOff));
-      e.data('segWeights', weights);
-      e.data('segDistances', distances);
-      e.data('routePoints', pointsToRoute(entry.pts));
+      const values = {
+        srcEndpoint: formatEndpoint(entry.srcOff),
+        tgtEndpoint: formatEndpoint(entry.tgtOff),
+        segWeights: weights,
+        segDistances: distances,
+        routePoints: pointsToRoute(entry.pts),
+      };
+      for (const [key, value] of Object.entries(values)) {
+        if (e.data(key) !== value) e.data(key, value);
+      }
+      cachedRoutes.set(
+        e.id(),
+        entry.pts.map((point) => ({ ...point })),
+      );
     }
   });
+  finishMeasure();
 }
