@@ -47,6 +47,7 @@ import { deriveFocusSelection, deriveSearchSelection } from './selection/deriveS
 import { resolveDragGroup, toggleSelected } from './selection/dragGroup';
 import { constrainDragDelta, snapVerticalDelta } from './selection/constrainedDrag';
 import { arrangeSelection, type SelectionArrangement } from './selection/arrangeSelection';
+import { SelectionArrangementIcon } from './selection/SelectionArrangementIcon';
 import {
   normalizeRect,
   nodesInMarquee,
@@ -2445,7 +2446,7 @@ function SelectionArrangeControl({
       </button>
       {open && (
         <div
-          className={`absolute bottom-full left-1/2 z-30 mb-2 grid min-w-max -translate-x-1/2 gap-1 rounded-lg border border-ink-200 bg-white p-1.5 shadow-xl dark:border-inkd-300 dark:bg-inkd-100 ${options.length > 2 ? 'grid-cols-3' : 'grid-cols-1'}`}
+          className={`absolute bottom-full left-1/2 z-30 mb-2 grid max-w-[calc(100vw-24px)] -translate-x-1/2 gap-1 rounded-lg border border-ink-200 bg-white p-1.5 shadow-xl dark:border-inkd-300 dark:bg-inkd-100 ${options.length > 2 ? 'min-w-[336px] grid-cols-3' : 'min-w-[176px] grid-cols-1'}`}
           role="menu"
           aria-label={`${label}选中的表`}
         >
@@ -2454,10 +2455,14 @@ function SelectionArrangeControl({
               key={option.operation}
               type="button"
               role="menuitem"
-              className="rounded px-2 py-1.5 text-[11px] font-medium text-ink-600 transition-colors hover:bg-sky-50 hover:text-sky-700 dark:text-inkd-700 dark:hover:bg-sky-500/10 dark:hover:text-sky-300"
+              data-arrangement-option={option.operation}
+              className="group flex min-w-[104px] items-center gap-2 rounded-md px-2 py-2 text-left text-[11px] font-medium text-ink-600 transition-colors hover:bg-sky-50 hover:text-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 dark:text-inkd-700 dark:hover:bg-sky-500/10 dark:hover:text-sky-300"
               onClick={() => onSelect(option.operation)}
             >
-              {option.label}
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-ink-100 bg-ink-50 text-ink-500 transition-colors group-hover:border-sky-200 group-hover:bg-sky-100 group-hover:text-sky-700 dark:border-inkd-300 dark:bg-inkd-200 dark:text-inkd-600 dark:group-hover:border-sky-700 dark:group-hover:bg-sky-500/10 dark:group-hover:text-sky-300">
+                <SelectionArrangementIcon operation={option.operation} />
+              </span>
+              <span className="whitespace-nowrap">{option.label}</span>
             </button>
           ))}
         </div>
