@@ -285,3 +285,39 @@ test('pan updates only overlay root geometry, not field content', async ({ page 
   });
   expect(contentMutations).toBe(0);
 });
+
+test('horizontal and vertical wheel scrolling show live canvas FPS', async ({ page }) => {
+  const overlay = await firstVisibleOverlay(page);
+  await enterReadMode(page);
+  const canvas = await page.locator('.cy-container').boundingBox();
+  expect(canvas).not.toBeNull();
+  if (!canvas) return;
+  await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+
+  const fpsHud = page.locator('[data-interaction-fps]');
+  const scrollAndAssert = async (deltaX: number, deltaY: number, axis: 'x' | 'y') => {
+    const before = await overlay.boundingBox();
+    expect(before).not.toBeNull();
+    if (!before) return;
+
+    for (let step = 0; step < 8; step += 1) {
+      await page.mouse.wheel(deltaX, deltaY);
+      await page.waitForTimeout(20);
+    }
+
+    await expect(fpsHud).toHaveAttribute('data-interaction-kind', 'pan');
+    await expect
+      .poll(async () => Number((await fpsHud.getAttribute('data-fps-value')) ?? 0))
+      .toBeGreaterThan(0);
+
+    const after = await overlay.boundingBox();
+    expect(after).not.toBeNull();
+    if (after) expect(Math.abs(after[axis] - before[axis])).toBeGreaterThan(10);
+
+    await page.waitForTimeout(260);
+    await expect(fpsHud).toHaveCount(0);
+  };
+
+  await scrollAndAssert(14, 0, 'x');
+  await scrollAndAssert(0, 14, 'y');
+});

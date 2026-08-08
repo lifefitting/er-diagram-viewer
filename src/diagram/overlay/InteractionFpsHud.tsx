@@ -5,7 +5,7 @@ export type FpsInteraction = 'pan' | 'table';
 export interface InteractionFpsHudHandle {
   start: (interaction: FpsInteraction) => void;
   frame: (timestamp?: number) => void;
-  stop: () => void;
+  stop: (interaction?: FpsInteraction) => void;
 }
 
 interface FpsSample {
@@ -100,14 +100,20 @@ export const InteractionFpsHud = forwardRef<InteractionFpsHudHandle>(
       [clearNoMovementTimer],
     );
 
-    const stop = useCallback(() => {
-      interactionRef.current = null;
-      previousFrameAtRef.current = null;
-      smoothedFrameMsRef.current = null;
-      lastPublishedAtRef.current = null;
-      clearNoMovementTimer();
-      setSample(null);
-    }, [clearNoMovementTimer]);
+    const stop = useCallback(
+      (interaction?: FpsInteraction) => {
+        // Debounced wheel sessions stop asynchronously. Do not let an old wheel
+        // timer hide a newer table-drag (or another future interaction kind).
+        if (interaction && interactionRef.current !== interaction) return;
+        interactionRef.current = null;
+        previousFrameAtRef.current = null;
+        smoothedFrameMsRef.current = null;
+        lastPublishedAtRef.current = null;
+        clearNoMovementTimer();
+        setSample(null);
+      },
+      [clearNoMovementTimer],
+    );
 
     useImperativeHandle(ref, () => ({ start, frame, stop }), [frame, start, stop]);
 
