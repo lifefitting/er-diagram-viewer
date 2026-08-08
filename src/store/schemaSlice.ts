@@ -1,7 +1,13 @@
 import type { StateCreator } from 'zustand';
 import { DEFAULT_PALETTE } from '../infer/inferModules';
 import type { AppState, SchemaState } from './types';
-import { EMPTY_MODULES, recomputeModules, runPipeline } from './pipeline';
+import {
+  derivePipeline,
+  EMPTY_MODULES,
+  parseAndMergeSql,
+  recomputeModules,
+  runPipeline,
+} from './pipeline';
 import {
   hasTableOverlap,
   reconcileDerivationSettings,
@@ -22,6 +28,9 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
   workspaceEpoch: 0,
   setSql(sql) {
     const { schema, inferred, modules } = runPipeline(sql, get().palette);
+    if (schema.tables.length === 0) {
+      throw new Error('未解析出任何表：请确认粘贴的是 CREATE TABLE / ALTER TABLE 脚本');
+    }
     set({
       rawSql: sql,
       schema,
@@ -50,17 +59,14 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
   },
   updateSql(sql) {
     const current = get();
-    // First derive the next table set. If it has no stable table in common
+    // Parse/merge once. If it has no stable table in common
     // with the current workspace, preserve setSql's explicit fresh-import
     // semantics instead of carrying unrelated review data across schemas.
-    const draft = runPipeline(
-      sql,
-      current.palette,
-      current.logicalKeys,
-      current.workspaceGroups,
-      current.moduleOverrides,
-    );
-    if (!hasTableOverlap(current.schema, draft.schema)) {
+    const merged = parseAndMergeSql(sql);
+    if (merged.tables.length === 0) {
+      throw new Error('未解析出任何表：请确认粘贴的是 CREATE TABLE / ALTER TABLE 脚本');
+    }
+    if (!hasTableOverlap(current.schema, merged)) {
       current.setSql(sql);
       return;
     }
@@ -68,9 +74,9 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
     // Surviving tables keep their positions, review decisions and other user
     // work. Removed tables/columns/edges are pruned, while newly added tables
     // intentionally have no position so DiagramCanvas can place only them.
-    const settings = reconcileDerivationSettings(current, draft.schema);
-    const next = runPipeline(
-      sql,
+    const settings = reconcileDerivationSettings(current, merged);
+    const next = derivePipeline(
+      merged,
       current.palette,
       settings.logicalKeys,
       settings.workspaceGroups,
@@ -171,6 +177,9 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       workspaceGroups,
       moduleOverrides,
     );
+    if (schema.tables.length === 0) {
+      throw new Error('存档中未解析出任何表');
+    }
     const columnOrders = reconcileColumnOrders(rest.columnOrders ?? {}, schema);
     set({
       // fresh-workspace baseline (mirrors setSql's reset list)

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useApp } from '../../store';
-import { parseSql } from '../../parser';
 import { SAMPLE_ECOMMERCE, SAMPLE_BLOG } from '../../samples';
 import {
   looksLikeArchive,
@@ -171,18 +170,9 @@ export function SqlInputDialog({ open, onClose }: Props) {
       return;
     }
     if (mode === 'sql' && !text.trim()) return;
-    // Pre-flight parse before committing: garbage input must never be allowed
-    // to alter the current workspace. SQL edits preserve surviving tables'
-    // layout/review state; archive imports deliberately replace everything.
+    // Store entry points derive before committing, so garbage input remains
+    // atomic without parsing the same SQL a second time in this dialog.
     try {
-      const sql = archive ? archive.state.rawSql : merged?.ok ? merged.state.rawSql : text;
-      const parsed = parseSql(sql);
-      if (parsed.tables.length === 0) {
-        setError(
-          '未解析出任何表：请确认粘贴的是 CREATE TABLE / ALTER TABLE 脚本。当前图保持不变。',
-        );
-        return;
-      }
       if (merged?.ok) importWorkspace(merged.state);
       else if (archive) importWorkspace(archive.state);
       else if (preserveExisting) updateSql(text);

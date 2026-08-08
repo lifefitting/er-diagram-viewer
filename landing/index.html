@@ -501,7 +501,7 @@
       <!-- ============== HERO ============== -->
       <section class="hero">
         <div class="container">
-          <span class="badge">v0.3.5 · 增量续编 / 字段排序 / 画布快控</span>
+          <span class="badge">v0.3.6 · 大图提速 / 实时帧率 / 拖拽回归</span>
           <h1>
             把 SQL DDL 变成<br />
             <span class="accent">可评审的 ER 图</span>
@@ -512,7 +512,7 @@
             分库分表靠 <code>out_trade_no</code> 这类业务键关联？扫描出来画成逻辑关联线。
             切到编辑模式，用 <code>Alt</code> / <code>Shift</code> 精调表位置，批量等宽、对齐和均匀分布；
             字段顺序也能直接拖动。后续追加 SQL 时，已有布局、连线和评审状态不会被推倒重来；
-            画布右键即可缩放、全览或切换网格。回到阅读模式，布局即刻锁定。逐表、逐字段写下评审意见，一键导出<strong>评审报告</strong>与<strong>标准数据库设计说明书</strong>。
+            画布右键即可缩放、全览或切换网格；大图平移和拖表只更新必要的卡片与连线，并在底部中央实时显示当前 FPS。回到阅读模式，布局即刻锁定。逐表、逐字段写下评审意见，一键导出<strong>评审报告</strong>与<strong>标准数据库设计说明书</strong>。
             多个评审现场可直接合并，各自原始布局尽量保留；导出工作区时用密码加密，旧版明文存档仍可打开。
             看清关系，评完带走。零后端，完全本地，导入的 SQL 不出你的浏览器。
           </p>
@@ -700,6 +700,11 @@
               <p>在现有 DDL 上追加表或字段时，保留卡片位置、宽度、字段顺序、手工路由、视口、模块和评审记录，只把新增表放到右侧。分片表合并改名也能延续原评审现场。</p>
             </div>
             <div class="feature">
+              <div class="feature-icon">⌁</div>
+              <h3>大图提速 · 实时帧率</h3>
+              <p>平移、缩放和拖表只同步必要的卡片几何与受影响连线，避免整张图逐帧重渲染；移动时底部中央实时显示 FPS，性能状态看得见。</p>
+            </div>
+            <div class="feature">
               <div class="feature-icon">🔐</div>
               <h3>工作区合并 · 加密存档</h3>
               <p>一次导入多个 <code>.erreview</code> 工作区，保留每个来源的内部布局与手工路由，仅在区域重叠时整体平移。新导出存档使用密码加密 SQL、评审与布局，同时兼容旧版未加密存档。</p>
@@ -779,10 +784,15 @@ bun run build:single <span class="c"># → ./dist-single/er-diagram-viewer.html<
                 <h4>把多个评审现场合在一起</h4>
                 <p>保布局合并多工作区，批量调模块与精准对齐分布；明确区分阅读/编辑模式，存档加密同时兼容旧格式。</p>
               </div>
-              <div class="tl-item current">
+              <div class="tl-item">
                 <span class="tl-ver">v0.3.5</span><span class="tl-date">2026-08</span>
                 <h4>续编而不推倒重来</h4>
                 <p>追加 SQL 保留布局、路由与评审记录；字段可拖拽排序，画布右键快控与六档缩放让日常操作更直接。版本从 v0.3.3 直接跃迁。</p>
+              </div>
+              <div class="tl-item current">
+                <span class="tl-ver">v0.3.6</span><span class="tl-date">2026-08</span>
+                <h4>让大图重新跟手</h4>
+                <p>覆盖层按帧增量同步，拖动只重算受影响连线；字段控件取消常驻动画，并用实时 FPS 反馈每次画布移动的流畅度。</p>
               </div>
             </div>
           </div>

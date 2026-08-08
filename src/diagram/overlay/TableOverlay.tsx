@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { DisplayOptions } from '../../store';
 import { reorderColumnNames, type ColumnDropPosition } from '../../store/columnOrder';
 import type { NoteSeverity, SearchScope } from '../../store/types';
@@ -30,20 +30,26 @@ interface TableOverlayProps {
    *  yellow find-highlight. */
   query?: string;
   searchScope?: SearchScope;
-  onDragHandle: (e: React.MouseEvent) => void;
-  onResizeHandle: (e: React.MouseEvent) => void;
-  onToggleCollapse: () => void;
-  onResetWidth: () => void;
+  registerElement: (id: string, element: HTMLDivElement | null) => void;
+  onDragHandle: (e: React.MouseEvent, id: string) => void;
+  onResizeHandle: (e: React.MouseEvent, tableName: string, id: string) => void;
+  onToggleCollapse: (tableName: string) => void;
+  onResetWidth: (tableName: string) => void;
   /** Start a drag-to-connect manual relation from one of this table's columns
    *  (`side` = which connect dot was grabbed). */
-  onConnectStart?: (colName: string, side: 'left' | 'right', e: React.MouseEvent) => void;
+  onConnectStart: (
+    tableName: string,
+    colName: string,
+    side: 'left' | 'right',
+    e: React.MouseEvent,
+  ) => void;
   /** Columns of this table that carry a review note (评审批注). */
   /** column → note severity（级别）; colors the row-marker dot. */
   noteColumns?: Map<string, NoteSeverity>;
   /** Click on a field row: open its review-note bubble. */
-  onOpenNote?: (colName: string, e: React.MouseEvent) => void;
+  onOpenNote: (tableName: string, colName: string, e: React.MouseEvent) => void;
   /** Commit one complete visual field order after a grip drag. */
-  onReorderColumns?: (columnNames: string[]) => void;
+  onReorderColumns: (tableName: string, columnNames: string[]) => void;
 }
 
 interface ColumnDragState {
@@ -59,7 +65,7 @@ interface ColumnDragState {
  * right edge = resize, click chevron = collapse, dbl-click right edge = reset
  * width).
  */
-export function TableOverlay({
+function TableOverlayComponent({
   pos,
   display,
   state,
@@ -72,6 +78,7 @@ export function TableOverlay({
   interactive = true,
   query = '',
   searchScope = 'all',
+  registerElement,
   onDragHandle,
   onResizeHandle,
   onToggleCollapse,
@@ -114,8 +121,12 @@ export function TableOverlay({
   );
 
   const onColumnReorderStart = (source: string, e: React.MouseEvent) => {
-    if (!onReorderColumns || display.onlyPk) return;
+    if (!interactive || display.onlyPk) return;
     columnDragCleanupRef.current?.();
+    // A fitted overview often renders below 100% zoom, where the card's
+    // viewport intentionally clips lower rows. Expand this one card as soon as
+    // its grip is held so every field becomes a real, top-most drop target.
+    setColumnDrag({ source, target: null, position: null });
     const startY = e.clientY;
     let active = false;
     let cancelled = false;
@@ -165,7 +176,9 @@ export function TableOverlay({
       if (!active || cancelled || !target) return;
       const current = table.columns.map((column) => column.name);
       const next = reorderColumnNames(current, source, target.name, target.position);
-      if (next.some((name, index) => name !== current[index])) onReorderColumns(next);
+      if (next.some((name, index) => name !== current[index])) {
+        onReorderColumns(table.name, next);
+      }
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') cancel();
@@ -181,8 +194,12 @@ export function TableOverlay({
 
   return (
     <div
+      ref={(element) => registerElement(pos.id, element)}
+      data-node-id={pos.id}
+      data-table-name={table.name}
       className={clsx(
-        'absolute rounded-md shadow-md pointer-events-auto select-none overflow-hidden transition-opacity',
+        'absolute rounded-md shadow-md pointer-events-auto select-none transition-opacity',
+        columnDrag ? 'z-30 overflow-visible' : 'overflow-hidden',
         // Light mode uses pure white so module border tinting reads clearly;
         // dark mode uses the elevated-surface color (inkd-100) so it doesn't
         // get lost on the inkd-50 page background.
@@ -191,10 +208,12 @@ export function TableOverlay({
         dimOpacity,
       )}
       style={{
-        left: x,
-        top: y,
+        left: 0,
+        top: 0,
+        transform: `translate3d(${x}px, ${y}px, 0)`,
         width: w,
         height: h,
+        willChange: 'transform',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         border: `1px solid ${moduleColor.border}`,
         // In pan mode the card is click-through so a drag pans the canvas
@@ -208,8 +227,8 @@ export function TableOverlay({
         moduleColor={moduleColor}
         collapsed={collapsed}
         query={tableNameQuery}
-        onDragHandle={onDragHandle}
-        onToggleCollapse={onToggleCollapse}
+        onDragHandle={(e) => onDragHandle(e, pos.id)}
+        onToggleCollapse={() => onToggleCollapse(table.name)}
       />
       {!collapsed && table.comment && table.comment.trim() && (
         <div
@@ -225,7 +244,13 @@ export function TableOverlay({
         </div>
       )}
       {!collapsed && (
-        <div className="text-[12px]">
+        <div
+          className={clsx(
+            'text-[12px]',
+            columnDrag &&
+              'relative rounded-b-md border-x border-b border-ink-200 bg-white shadow-xl dark:border-inkd-300 dark:bg-inkd-100',
+          )}
+        >
           {visibleColumns.map((c) => (
             <ColumnRow
               key={c.name}
@@ -237,13 +262,13 @@ export function TableOverlay({
               isFk={fkColumns?.has(c.name) ?? false}
               query={fieldNameQuery}
               commentQuery={commentQuery}
-              onConnectStart={onConnectStart && ((side, e) => onConnectStart(c.name, side, e))}
+              onConnectStart={
+                interactive ? (side, e) => onConnectStart(table.name, c.name, side, e) : undefined
+              }
               noteSeverity={noteColumns?.get(c.name) ?? null}
-              onOpenNote={onOpenNote && ((e) => onOpenNote(c.name, e))}
+              onOpenNote={(e) => onOpenNote(table.name, c.name, e)}
               onReorderStart={
-                onReorderColumns && !display.onlyPk
-                  ? (e) => onColumnReorderStart(c.name, e)
-                  : undefined
+                interactive && !display.onlyPk ? (e) => onColumnReorderStart(c.name, e) : undefined
               }
               reorderState={
                 columnDrag?.source === c.name
@@ -262,11 +287,11 @@ export function TableOverlay({
         <div
           className="absolute top-0 right-0 h-full cursor-ew-resize group"
           style={{ width: 8 }}
-          onMouseDown={onResizeHandle}
+          onMouseDown={(e) => onResizeHandle(e, table.name, pos.id)}
           onDoubleClick={(e) => {
             if (!hasManualWidth) return;
             e.stopPropagation();
-            onResetWidth();
+            onResetWidth(table.name);
           }}
           title={hasManualWidth ? '拖动调整宽度 · 双击恢复自动宽度' : '拖动调整宽度'}
         >
@@ -285,3 +310,7 @@ export function TableOverlay({
     </div>
   );
 }
+
+/** Geometry moves imperatively, so semantic prop equality can now keep the
+ * complete field subtree out of pan/zoom/drag reconciliation. */
+export const TableOverlay = memo(TableOverlayComponent);

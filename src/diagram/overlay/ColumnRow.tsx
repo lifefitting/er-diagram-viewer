@@ -70,7 +70,7 @@ export function ColumnRow({
   return (
     <div
       className={clsx(
-        'group/row relative border-t border-ink-100 dark:border-inkd-300',
+        'field-row group/row relative border-t border-ink-100 dark:border-inkd-300',
         // PK rows get a faint amber tint so the user can scan for the primary
         // key at a glance. The dark-mode variant is a translucent amber so it
         // sits on top of the card surface without overwhelming it.
@@ -111,13 +111,18 @@ export function ColumnRow({
         </span>
         {/* Keep the 14px slot in both modes so switching 阅读/编辑 never makes
             every field label jump sideways. In edit mode, row hover reveals a
-            three-bar grip whose breathing cadence matches the connect dots. */}
+            three-bar grip without creating a permanent per-field animation. */}
         <span className="flex h-[22px] w-[14px] shrink-0 items-center justify-center">
           {onReorderStart && (
             <button
               type="button"
               className={clsx(
-                'column-reorder-hit flex h-[22px] w-[14px] items-center justify-center rounded-sm',
+                // `relative` is functional, not decorative: the three-bar
+                // pseudo-element is absolutely positioned and must use this
+                // button—not the whole review-clickable row—as its containing
+                // block. Otherwise the visible grip lands in the row centre
+                // while its real hit target stays before the field name.
+                'column-reorder-hit relative flex h-[22px] w-[14px] items-center justify-center rounded-sm',
                 'opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100',
               )}
               title="按住并上下拖动，调整字段显示顺序"
@@ -129,17 +134,11 @@ export function ColumnRow({
                 onReorderStart(e);
               }}
               onClick={(e) => e.stopPropagation()}
-            >
-              <span className="column-reorder-grip" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </button>
+            />
           )}
         </span>
         <span
-          className="text-ink-800 dark:text-inkd-800 flex-1 min-w-0 truncate"
+          className="column-name text-ink-800 dark:text-inkd-800 flex-1 min-w-0 truncate"
           style={{ fontWeight: isPk ? 600 : 400 }}
         >
           {highlightMatch(col.name, query)}
@@ -167,9 +166,10 @@ export function ColumnRow({
       {/* Connect dots (触点): appear on row hover at BOTH edges of the name
           row — the user drags from whichever side faces the target table.
           The BUTTON is a 22px invisible hit zone (a magnetic snap radius:
-          getting close is enough), the inner span is the 14px visual dot with
-          the breathing halo; hovering locks the halo bright and grows the dot
-          (see styles.css). The cursor is a custom "draw a line from here"
+          getting close is enough); CSS pseudo-elements draw the 14px visual
+          dot and its short entrance pulse without adding per-field DOM nodes.
+          Hovering locks the halo bright and grows the dot (see styles.css).
+          The cursor is a custom "draw a line from here"
           glyph. z-10 keeps them above the card's resize strip; mousedown must
           not bubble (marquee/pan handlers live underneath). */}
       {onConnectStart &&
@@ -179,7 +179,7 @@ export function ColumnRow({
             type="button"
             className={clsx(
               'connect-dot-hit absolute z-10 flex h-[22px] w-[22px] items-center justify-center',
-              'opacity-0 transition-opacity group-hover/row:opacity-100',
+              'opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100',
             )}
             style={{ [side]: -1, top: FIELD_ROW_HEIGHT / 2 - 11 }}
             title="从这里拉一条线到目标字段，建立外键 / 逻辑关联"
@@ -189,17 +189,7 @@ export function ColumnRow({
               e.stopPropagation();
               onConnectStart(side, e);
             }}
-          >
-            <span
-              className={clsx(
-                'connect-dot flex h-[14px] w-[14px] items-center justify-center rounded-full',
-                'border border-sky-500 bg-white dark:bg-inkd-100',
-              )}
-              aria-hidden
-            >
-              <span className="h-[6px] w-[6px] rounded-full bg-sky-500" />
-            </span>
-          </button>
+          />
         ))}
       {showComment && col.comment && (
         <div
@@ -224,6 +214,7 @@ function ColumnDropMarker({ position }: { position: 'top' | 'bottom' }) {
         'pointer-events-none absolute left-2 right-2 z-20 h-[2px] rounded-full bg-sky-500 shadow-[0_0_7px_rgba(14,165,233,0.75)]',
         position === 'top' ? '-top-px' : '-bottom-px',
       )}
+      data-column-drop-marker={position}
       aria-hidden="true"
     />
   );

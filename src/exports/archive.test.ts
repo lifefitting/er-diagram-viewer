@@ -64,7 +64,86 @@ const SNAPSHOT = {
 
 const OPTS = { appVersion: '0.3.1', exportedAt: '2026-07-12T08:00:00.000Z', tableCount: 2 };
 
+/**
+ * A literal archive emitted by the v0.3.x format. Keep this independent from
+ * buildWorkspaceArchive: it is a backwards-compatibility tripwire for users'
+ * existing files, not another round-trip through the current serializer.
+ */
+const LEGACY_V03_ARCHIVE = `{
+  "format": "erreview",
+  "formatVersion": 1,
+  "persistVersion": 2,
+  "appVersion": "0.3.3",
+  "exportedAt": "2026-07-01T00:00:00.000Z",
+  "tableCount": 2,
+  "state": {
+    "rawSql": "CREATE TABLE a (id INT PRIMARY KEY);",
+    "palette": "professional",
+    "theme": "dark",
+    "sidebarCollapsed": false,
+    "decisions": { "a.x->b.y": "accept" },
+    "manualFks": [],
+    "logicalKeys": ["out_trade_no"],
+    "moduleOverrides": { "t:a": "account" },
+    "fieldNotes": {},
+    "display": {
+      "onlyPk": false,
+      "showType": true,
+      "showComment": true,
+      "showIndex": true,
+      "showLowConfidence": false,
+      "showGrid": true,
+      "showLogicalLinks": true,
+      "showManualLinks": true
+    },
+    "collapsed": { "a": true },
+    "tableWidths": { "a": 280 },
+    "columnOrders": { "a": ["id"] },
+    "deletedTables": {},
+    "nodePositions": { "t:a": { "x": 12, "y": 34 } },
+    "manualRoutes": { "a.x->b.y": [{ "x": 0, "y": 0 }, { "x": 9, "y": 9 }] },
+    "viewport": { "x": -50, "y": 20, "zoom": 1.25 },
+    "workspaceGroups": []
+  }
+}`;
+
 describe('workspace archive round-trip', () => {
+  it('keeps the v0.3.x envelope and persisted workspace fields readable', () => {
+    expect(ARCHIVE_VERSION).toBe(1);
+    expect(PERSIST_VERSION).toBe(2);
+    const parsed = parseWorkspaceArchive(LEGACY_V03_ARCHIVE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.downgraded).toBe(false);
+    expect(parsed.meta.appVersion).toBe('0.3.3');
+    expect(parsed.state.rawSql).toBe('CREATE TABLE a (id INT PRIMARY KEY);');
+    expect(parsed.state.nodePositions).toEqual({ 't:a': { x: 12, y: 34 } });
+    expect(parsed.state.manualRoutes).toEqual({
+      'a.x->b.y': [
+        { x: 0, y: 0 },
+        { x: 9, y: 9 },
+      ],
+    });
+    expect(parsed.state.viewport).toEqual({ x: -50, y: 20, zoom: 1.25 });
+  });
+
+  it('does not leak runtime performance caches into a newly built archive', () => {
+    const envelope = JSON.parse(buildWorkspaceArchive(SNAPSHOT, OPTS)) as Record<string, unknown>;
+    expect(Object.keys(envelope)).toEqual([
+      'format',
+      'formatVersion',
+      'persistVersion',
+      'appVersion',
+      'exportedAt',
+      'tableCount',
+      'state',
+    ]);
+    const state = envelope.state as Record<string, unknown>;
+    expect(state).not.toHaveProperty('routingContext');
+    expect(state).not.toHaveProperty('overlayGeometry');
+    expect(state).not.toHaveProperty('pipelineCache');
+  });
+
   it('build → parse restores every persisted field and the meta', () => {
     const json = buildWorkspaceArchive(SNAPSHOT, OPTS);
     const parsed = parseWorkspaceArchive(json);

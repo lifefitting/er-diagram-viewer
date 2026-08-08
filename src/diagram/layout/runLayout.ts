@@ -1,5 +1,6 @@
 import type { Core } from 'cytoscape';
 import { arrangeForPublication } from './arrangeForPublication';
+import { measureRuntimeStage } from '../../performance/runtimeMeasure';
 
 /**
  * Publication-grade layered (LR) layout with orthogonal channel routing. dagre
@@ -10,7 +11,7 @@ import { arrangeForPublication } from './arrangeForPublication';
  * `fitWithZoomClamp`).
  */
 export function runLayout(cy: Core) {
-  arrangeForPublication(cy);
+  measureRuntimeStage('er:layout:arrange', () => arrangeForPublication(cy));
   // arrangeForPublication writes node positions directly rather than running a
   // cy.layout(), so cytoscape doesn't fire `layoutstop` on its own. Emit it
   // ourselves so the canvas's endpoint-refresh handler still runs.

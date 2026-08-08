@@ -36,9 +36,15 @@ coverage/
 
 # Playwright (smoke test artifacts from MCP runs)
 .playwright-mcp/
+.playwright-cli/
 test-results/
 playwright-report/
+perf-results/
 
 # Claude Code (local-only settings + runtime locks)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

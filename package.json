@@ -1,7 +1,7 @@
 {
   "name": "er-diagram-viewer",
   "private": true,
-  "version": "0.3.5",
+  "version": "0.3.6",
   "type": "module",
   "description": "纯前端数据库设计评审工作台：将 SQL DDL 转为可编辑 ER 图，支持关系推断、工作区合并、结构化评审、标准文档与加密存档。Pure-frontend SQL DDL → reviewable ER diagram workspace.",
   "keywords": [
@@ -37,6 +37,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "perf:baseline": "bun perf/benchmark.mjs",
+    "perf:smoke": "PERF_SCENARIOS=small PERF_ITERATIONS=3 PERF_WARMUPS=0 PERF_MOVE_STEPS=24 PERF_STEP_DELAY_MS=8 bun perf/benchmark.mjs",
+    "perf:check": "bun perf/check.mjs",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "lint:fix": "eslint --fix \"src/**/*.{ts,tsx}\"",
@@ -51,7 +55,9 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/cytoscape": "^3.21.7",
+    "@types/node": "^26.1.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@typescript-eslint/eslint-plugin": "^7.18.0",

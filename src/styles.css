@@ -90,85 +90,122 @@ body {
 }
 
 /*
- * Connect dots (字段两侧的连线触点)。
- *  - 呼吸光晕：琥珀色 halo 明显地涨落（外加轻微透明度脉动），让触点"活着"；
- *    hover 到触点上时呼吸停止、光晕常亮并放大 —— 磁性吸附反馈。
+ * Field controls (连线触点与字段排序手柄)。
+ *  - 控件只在当前字段行 hover / focus-within 时播放一次短促提示；空闲时没有
+ *    常驻动画，避免大图中每个字段都持续产生 animation/compositing 开销。
+ *  - 动画只改变 transform/opacity；hover 到触点上时光晕常亮并放大。
  *  - 自定义光标：一颗小圆点拖出一条带箭头的弧线，表达"从这个点拉一条线出去"，
  *    替代歧义的十字星。拖线过程中整个画布沿用同一光标（.cy-cursor-connecting）。
- * 呼吸动画对 prefers-reduced-motion 用户禁用；光标不受影响。
+ * 提示动画对 prefers-reduced-motion 用户禁用；光标不受影响。
  */
 @media (prefers-reduced-motion: no-preference) {
-  @keyframes connect-dot-breathe {
-    0%,
-    100% {
-      box-shadow: 0 0 2px 1px rgba(245, 158, 11, 0.25);
-      opacity: 0.75;
+  @keyframes field-control-pulse {
+    0% {
+      transform: translate(-50%, -50%) scale(0.88);
+      opacity: 0.4;
     }
-    50% {
-      box-shadow: 0 0 12px 5px rgba(245, 158, 11, 0.95);
+    65% {
+      transform: translate(-50%, -50%) scale(1.08);
       opacity: 1;
     }
-  }
-  .connect-dot {
-    animation: connect-dot-breathe 1.6s ease-in-out infinite;
-  }
-  @keyframes column-reorder-breathe {
-    0%,
     100% {
-      filter: drop-shadow(0 0 1px rgba(245, 158, 11, 0.18));
-      opacity: 0.42;
-    }
-    50% {
-      filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.68));
-      opacity: 0.95;
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 0.75;
     }
   }
-  .column-reorder-grip {
-    animation: column-reorder-breathe 1.6s ease-in-out infinite;
+
+  .field-row:hover .connect-dot-hit::before,
+  .field-row:hover .connect-dot-hit::after,
+  .field-row:focus-within .connect-dot-hit::before,
+  .field-row:focus-within .connect-dot-hit::after,
+  .field-row:hover .column-reorder-hit::before,
+  .field-row:focus-within .column-reorder-hit::before {
+    animation: field-control-pulse 0.42s ease-out 1;
   }
-}
-/* Hover = magnetic snap feedback: halo locks on bright, dot grows. */
-.connect-dot-hit:hover .connect-dot {
-  animation: none;
-  box-shadow: 0 0 10px 4px rgba(245, 158, 11, 0.9);
-  transform: scale(1.35);
-}
-.connect-dot {
-  transition: transform 0.12s ease-out;
 }
 
-/* Field reorder affordance: three quiet bars, spatially separated from the
-   edge connect ports. It shares their 1.6s breathing cadence but stays neutral
-   grey so the two gestures remain visually distinct. */
-.column-reorder-hit {
-  cursor: grab;
-}
-.column-reorder-hit:hover .column-reorder-grip,
-.column-reorder-hit:focus-visible .column-reorder-grip {
-  animation: none;
-  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.72));
-  opacity: 1;
-  transform: scale(1.12);
-}
-.column-reorder-grip {
-  display: flex;
-  width: 9px;
-  flex-direction: column;
-  gap: 2px;
-  opacity: 0.55;
+/* The semantic buttons stay mounted in edit mode so their first pointer-down
+   and keyboard focus are never lost. Purely visual pieces live in pseudo-
+   elements, removing eight decorative nodes from every field row. */
+.connect-dot-hit::before,
+.connect-dot-hit::after,
+.column-reorder-hit::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
   transition:
     transform 0.12s ease-out,
     opacity 0.12s ease-out;
 }
-.column-reorder-grip > span {
-  display: block;
-  height: 1px;
-  width: 100%;
+.connect-dot-hit::before {
+  width: 14px;
+  height: 14px;
+  border: 1px solid #0ea5e9;
   border-radius: 999px;
-  background: rgba(100, 116, 139, 0.72);
+  background: #fff;
 }
-.dark .column-reorder-grip > span {
-  background: rgba(148, 163, 184, 0.68);
+.dark .connect-dot-hit::before {
+  background: #111728;
+}
+.connect-dot-hit::after {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #0ea5e9;
+}
+
+/* Hover = magnetic snap feedback: halo locks on bright, dot grows. */
+.connect-dot-hit:hover::before,
+.connect-dot-hit:focus-visible::before,
+.connect-dot-hit:hover::after,
+.connect-dot-hit:focus-visible::after {
+  animation: none;
+  transform: translate(-50%, -50%) scale(1.35);
+}
+.connect-dot-hit:hover::before,
+.connect-dot-hit:focus-visible::before {
+  box-shadow: 0 0 10px 4px rgba(245, 158, 11, 0.9);
+}
+
+/* Field reorder affordance: three quiet bars, spatially separated from the
+   edge connect ports. It stays neutral grey so the two gestures remain
+   visually distinct. */
+.column-reorder-hit {
+  cursor: grab;
+}
+.column-reorder-hit::before {
+  width: 9px;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to bottom,
+    rgba(100, 116, 139, 0.72) 0 1px,
+    transparent 1px 3px,
+    rgba(100, 116, 139, 0.72) 3px 4px,
+    transparent 4px 6px,
+    rgba(100, 116, 139, 0.72) 6px 7px
+  );
+  opacity: 0.55;
+}
+.dark .column-reorder-hit::before {
+  background: linear-gradient(
+    to bottom,
+    rgba(148, 163, 184, 0.68) 0 1px,
+    transparent 1px 3px,
+    rgba(148, 163, 184, 0.68) 3px 4px,
+    transparent 4px 6px,
+    rgba(148, 163, 184, 0.68) 6px 7px
+  );
+}
+.column-reorder-hit:hover::before,
+.column-reorder-hit:focus-visible::before {
+  animation: none;
+  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.72));
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.12);
 }
 body.column-reorder-active,
 body.column-reorder-active * {
