@@ -1,15 +1,16 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Toolbar } from './ui/overlays/Toolbar';
 import { CanvasControls } from './ui/overlays/CanvasControls';
 import { RecycleBin } from './ui/overlays/RecycleBin';
 import { ReviewNotesOverlay } from './ui/overlays/ReviewNotes';
-import { SqlInputDialog } from './ui/overlays/SqlInputDialog';
+import { SqlInputDialog, type ImportMode } from './ui/overlays/SqlInputDialog';
 import { Sidebar } from './ui/sidebar/Sidebar';
 import { useApp } from './store';
-import { SAMPLE_ECOMMERCE } from './samples';
 import { useApplyTheme } from './ui/theme/useApplyTheme';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { CanvasContextMenu, type CanvasContextMenuPosition } from './ui/overlays/CanvasContextMenu';
+import { EmptyWorkspace, WorkspaceRecovery } from './ui/empty/EmptyWorkspace';
+import { resolveStartupView } from './store/startupState';
 
 // Lazy-load the diagram canvas. Pulling cytoscape (≈250 KB minified) only
 // when there's actually a schema to render lets the first paint complete
@@ -21,34 +22,48 @@ const DiagramCanvas = lazy(() => import('./diagram/DiagramCanvas'));
 
 export default function App() {
   useApplyTheme();
-  const [importOpen, setImportOpen] = useState(false);
+  const hydrated = usePersistHydrated();
+  const [startupComplete, setStartupComplete] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const startupHandledRef = useRef(false);
+  const [importDialog, setImportDialog] = useState<{
+    open: boolean;
+    mode: ImportMode;
+    initialFiles: File[];
+  }>({ open: false, mode: 'sql', initialFiles: [] });
   const [canvasContextMenu, setCanvasContextMenu] = useState<CanvasContextMenuPosition | null>(
     null,
   );
   const schema = useApp((s) => s.schema);
+  const rawSql = useApp((s) => s.rawSql);
   const sidebarCollapsed = useApp((s) => s.sidebarCollapsed);
-  const setSql = useApp((s) => s.setSql);
   const workspaceEpoch = useApp((s) => s.workspaceEpoch);
   const closeCanvasContextMenu = useCallback(() => setCanvasContextMenu(null), []);
+  const openImport = useCallback((mode: ImportMode = 'sql', initialFiles: File[] = []) => {
+    setImportDialog({ open: true, mode, initialFiles });
+  }, []);
+  const closeImport = useCallback(
+    () => setImportDialog((current) => ({ ...current, open: false, initialFiles: [] })),
+    [],
+  );
 
   useEffect(() => {
-    // Three startup paths, in priority order:
-    //   1. Persisted `rawSql` exists → just rebuild derived state (schema,
-    //      inferred FKs, modules). The user's last imported SQL, decisions,
-    //      collapse states, etc. all come back. Survives ⌘R.
-    //   2. No persisted SQL → first-time visit, load the bundled sample so
-    //      the canvas isn't empty.
-    //   3. Persisted SQL exists but parse failed → KEEP rawSql (it may be
-    //      irreplaceable production DDL; the import dialog still shows it for
-    //      hand-fixing) and surface the failure as an empty canvas plus a
-    //      sidebar warning. Never overwrite the user's SQL with the sample.
+    if (!hydrated || startupHandledRef.current) return;
+    startupHandledRef.current = true;
+    // Hydration-safe startup paths:
+    //   1. Persisted rawSql → rebuild derived state and restore the workspace.
+    //   2. No rawSql → leave the store empty and show the explicit launcher.
+    //   3. Reparse failure → keep the irreplaceable SQL and offer recovery.
+    // Never infer "empty" before hydration, and never overwrite a failed
+    // restore with the bundled sample.
     const state = useApp.getState();
-    if (state.rawSql) {
+    if (state.rawSql.trim()) {
       try {
         state.reparse();
       } catch (err) {
         console.error('[startup] failed to reparse persisted SQL:', err);
         const msg = err instanceof Error ? err.message : String(err);
+        setStartupError(msg);
         useApp.setState({
           schema: {
             tables: [],
@@ -62,17 +77,20 @@ export default function App() {
           },
         });
       }
-    } else {
-      state.setSql(SAMPLE_ECOMMERCE);
     }
-  }, [setSql]);
+    setStartupComplete(true);
+  }, [hydrated]);
+
+  const tableCount = schema?.tables.length ?? 0;
+  const startupView = resolveStartupView({ hydrated, startupComplete, rawSql, tableCount });
+  const hasSchema = startupView === 'workspace';
 
   return (
     <div className="h-full flex flex-col bg-white dark:bg-inkd-50 text-ink-800 dark:text-inkd-800">
       {/* Toolbar gets its own stacking context so canvas overlays can never sit
           on top of it, even before the canvas container clips them. */}
       <div className="relative z-30">
-        <Toolbar onOpenImport={() => setImportOpen(true)} />
+        <Toolbar onOpenImport={() => openImport('sql')} />
       </div>
       {/* The canvas region clips overflow so dragged table cards cannot bleed
           out past the canvas edges (under the toolbar or behind the sidebar). */}
@@ -81,7 +99,7 @@ export default function App() {
           data-testid="canvas-region"
           className="absolute inset-0"
           onContextMenu={(event) => {
-            if (!schema || schema.tables.length === 0) return;
+            if (!hasSchema) return;
             const target = event.target;
             if (
               target instanceof Element &&
@@ -93,7 +111,7 @@ export default function App() {
             setCanvasContextMenu({ x: event.clientX, y: event.clientY });
           }}
         >
-          {schema && schema.tables.length > 0 ? (
+          {startupView === 'workspace' ? (
             <ErrorBoundary>
               <Suspense fallback={<CanvasLoading />}>
                 {/* keyed so an archive import (importWorkspace) remounts the
@@ -103,21 +121,28 @@ export default function App() {
                 <DiagramCanvas key={workspaceEpoch} />
               </Suspense>
             </ErrorBoundary>
+          ) : startupView === 'empty' ? (
+            <EmptyWorkspace onOpenImport={openImport} />
+          ) : startupView === 'recovery' ? (
+            <WorkspaceRecovery error={startupError} onOpenSql={() => openImport('sql')} />
           ) : (
-            <div className="h-full flex items-center justify-center text-ink-400 dark:text-inkd-500 text-sm">
-              点击「导入 SQL」开始
-            </div>
+            <CanvasLoading label="正在恢复当前会话…" />
           )}
-          {canvasContextMenu && (
+          {hasSchema && canvasContextMenu && (
             <CanvasContextMenu position={canvasContextMenu} onClose={closeCanvasContextMenu} />
           )}
         </main>
-        {schema && schema.tables.length > 0 && <CanvasControls />}
-        {schema && schema.tables.length > 0 && <RecycleBin />}
-        {schema && schema.tables.length > 0 && <ReviewNotesOverlay />}
-        <Sidebar collapsed={sidebarCollapsed} />
+        {hasSchema && <CanvasControls />}
+        {hasSchema && <RecycleBin />}
+        {hasSchema && <ReviewNotesOverlay />}
+        {hasSchema && <Sidebar collapsed={sidebarCollapsed} />}
       </div>
-      <SqlInputDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      <SqlInputDialog
+        open={importDialog.open}
+        initialMode={importDialog.mode}
+        initialFiles={importDialog.initialFiles}
+        onClose={closeImport}
+      />
     </div>
   );
 }
@@ -128,7 +153,7 @@ export default function App() {
  * skeleton in index.html so there's no jarring swap when React takes over
  * from the static skeleton.
  */
-function CanvasLoading() {
+function CanvasLoading({ label = '正在加载图表引擎…' }: { label?: string }) {
   return (
     <div className="h-full w-full flex items-center justify-center bg-ink-50/40 dark:bg-inkd-50/40">
       <div className="flex items-center gap-2 text-ink-400 dark:text-inkd-500 text-[12px]">
@@ -148,8 +173,24 @@ function CanvasLoading() {
             strokeLinecap="round"
           />
         </svg>
-        正在加载图表引擎…
+        {label}
       </div>
     </div>
   );
+}
+
+function usePersistHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => useApp.persist.hasHydrated());
+
+  useEffect(() => {
+    setHydrated(useApp.persist.hasHydrated());
+    const unsubscribeHydrate = useApp.persist.onHydrate(() => setHydrated(false));
+    const unsubscribeFinish = useApp.persist.onFinishHydration(() => setHydrated(true));
+    return () => {
+      unsubscribeHydrate();
+      unsubscribeFinish();
+    };
+  }, []);
+
+  return hydrated;
 }
