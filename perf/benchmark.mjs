@@ -211,7 +211,17 @@ async function waitForPaint(page) {
 }
 
 async function importFixture(page, scenario) {
-  if (!scenario.useDefault) {
+  if (scenario.useDefault) {
+    // v0.3.6 and older auto-load the 14-table sample. Newer builds expose it
+    // explicitly from the empty workspace so cold startup stays representative
+    // of a real first visit. Support both paths to keep cross-version reports
+    // comparable.
+    const sampleLauncher = page.getByRole('button', {
+      name: '查看示例 ER 图',
+      exact: true,
+    });
+    if ((await sampleLauncher.count()) > 0) await sampleLauncher.click();
+  } else {
     await page.getByRole('button', { name: '导入', exact: true }).click();
     const textarea = page.locator('textarea').first();
     await textarea.waitFor({ state: 'visible' });
@@ -444,17 +454,14 @@ function summarizeScenario(rounds) {
       formal.map((round) => round.pageStats.runningControlAnimations),
     ),
     runtimeStages: Object.fromEntries(
-      [
-        'er:pipeline:parse-merge',
-        'er:pipeline:derive',
-        'er:layout:arrange',
-        'er:routing:full',
-      ].map((name) => [
-        name,
-        distribution(
-          formal.map((round) => round.runtimeMeasures?.[name]?.totalMs).filter(Number.isFinite),
-        ),
-      ]),
+      ['er:pipeline:parse-merge', 'er:pipeline:derive', 'er:layout:arrange', 'er:routing:full'].map(
+        (name) => [
+          name,
+          distribution(
+            formal.map((round) => round.runtimeMeasures?.[name]?.totalMs).filter(Number.isFinite),
+          ),
+        ],
+      ),
     ),
     actions: actionSummary,
   };
