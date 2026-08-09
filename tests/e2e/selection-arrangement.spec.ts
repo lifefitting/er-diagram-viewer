@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { loadSampleWorkspace } from './helpers/workspace';
 
 const alignmentOperations = [
   'align-left',
@@ -43,8 +44,7 @@ async function visibleTableHandles(page: Page, required: number): Promise<Locato
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
-  await page.locator('.cy-container canvas').first().waitFor({ state: 'visible' });
-  await expect.poll(() => page.locator('[data-node-id]').count()).toBeGreaterThan(0);
+  await loadSampleWorkspace(page);
   await page.locator('button').filter({ hasText: '编辑' }).first().click();
 });
 

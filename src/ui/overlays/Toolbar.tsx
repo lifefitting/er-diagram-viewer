@@ -50,9 +50,11 @@ export function Toolbar({ onOpenImport }: Props) {
     <header
       className={clsx(
         'h-11 flex items-center pl-3 pr-2 gap-2 border-b backdrop-blur transition-colors',
-        canvasMode === 'pan'
-          ? 'border-sky-200 bg-sky-50/95 dark:border-sky-800/60 dark:bg-sky-950/20'
-          : 'border-amber-200 bg-amber-50/90 dark:border-amber-800/60 dark:bg-amber-950/15',
+        !hasSchema
+          ? 'border-ink-200 bg-white/90 dark:border-inkd-300 dark:bg-inkd-100/90'
+          : canvasMode === 'pan'
+            ? 'border-sky-200 bg-sky-50/95 dark:border-sky-800/60 dark:bg-sky-950/20'
+            : 'border-amber-200 bg-amber-50/90 dark:border-amber-800/60 dark:bg-amber-950/15',
         'relative z-30',
       )}
     >
@@ -81,21 +83,27 @@ export function Toolbar({ onOpenImport }: Props) {
         </div>
       </div>
 
-      <Divider />
-
-      <SearchInput value={search} onChange={setSearch} />
+      {hasSchema && (
+        <>
+          <Divider />
+          <SearchInput value={search} onChange={setSearch} />
+        </>
+      )}
 
       <div className="flex-1" />
 
-      <ModeSwitcher mode={canvasMode} onChange={setCanvasMode} />
-
-      <Divider />
+      {hasSchema && (
+        <>
+          <ModeSwitcher mode={canvasMode} onChange={setCanvasMode} />
+          <Divider />
+        </>
+      )}
 
       {/* RIGHT: appearance tweaks (palette + theme) then I/O actions
           (import + export). Theme sits next to palette because both are
           aesthetic controls; the divider separates them from the action
           buttons so a glance distinguishes "settings" from "do it now". */}
-      <PaletteDropdown current={palette} />
+      {hasSchema && <PaletteDropdown current={palette} />}
 
       <ThemeSwitcher />
 
@@ -119,7 +127,7 @@ export function Toolbar({ onOpenImport }: Props) {
         <span>导入</span>
       </button>
 
-      <ExportMenu />
+      {hasSchema && <ExportMenu />}
     </header>
   );
 }

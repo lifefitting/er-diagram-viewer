@@ -1,4 +1,6 @@
 export const PERF_SCENARIOS = Object.freeze({
+  // Uses the bundled 14-table example. Current builds click the empty-state
+  // launcher explicitly; legacy comparison targets still auto-load it.
   small: Object.freeze({ name: 'small', tables: 14, columns: null, useDefault: true }),
   medium: Object.freeze({ name: 'medium', tables: 80, columns: 10, useDefault: false }),
   large: Object.freeze({ name: 'large', tables: 160, columns: 12, useDefault: false }),
@@ -51,7 +53,10 @@ export function generateSql(tableCount, columnsPerTable, topology = 'chain') {
         : topology === 'star'
           ? [0]
           : topology === 'dense'
-            ? Array.from({ length: Math.min(3, tableIndex) }, (_, offset) => tableIndex - offset - 1)
+            ? Array.from(
+                { length: Math.min(3, tableIndex) },
+                (_, offset) => tableIndex - offset - 1,
+              )
             : [tableIndex - 1];
     references.forEach((_, index) => lines.push(`  parent_key_${index} BIGINT`));
     const structuralColumns = 1 + references.length;

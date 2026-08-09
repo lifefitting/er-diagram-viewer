@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { loadSampleWorkspace } from './helpers/workspace';
 
 async function firstVisibleOverlay(page: Page): Promise<Locator> {
   const overlays = page.locator('[data-node-id]');
@@ -33,8 +34,7 @@ async function enterReadMode(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
-  await page.locator('.cy-container canvas').first().waitFor({ state: 'visible' });
-  await expect.poll(() => page.locator('[data-node-id]').count()).toBeGreaterThan(0);
+  await loadSampleWorkspace(page);
 });
 
 test('field controls mount only in edit mode without shifting table content', async ({ page }) => {

@@ -2,29 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useApp } from '../../store';
 import { SAMPLE_ECOMMERCE, SAMPLE_BLOG } from '../../samples';
-import {
-  looksLikeArchive,
-  parseWorkspaceArchive,
-  isEncryptedWorkspaceArchive,
-  decryptWorkspaceArchive,
-  ARCHIVE_EXTENSION,
-  type ParseArchiveResult,
-} from '../../exports/archive';
+import { ARCHIVE_EXTENSION } from '../../exports/archive';
 import { mergeWorkspaceArchives, type MergeArchivesResult } from '../../exports/mergeArchives';
+import { inspectImportFiles, type LoadedArchive } from '../import/importFiles';
+import { useArchiveUnlock } from '../import/useArchiveUnlock';
 import { ArchivePasswordDialog } from './ArchivePasswordDialog';
 
 interface Props {
   open: boolean;
   onClose: () => void;
+  initialMode?: ImportMode;
+  initialFiles?: readonly File[];
 }
 
 interface LoadedFile {
   name: string;
   size: number;
 }
-
-/** A successfully parsed `.erreview` file staged for import. */
-type LoadedArchive = Extract<ParseArchiveResult, { ok: true }>;
 
 /** The archive tab's staged file: the parsed payload plus where it came from. */
 interface StagedArchive {
@@ -35,7 +29,7 @@ interface StagedArchive {
 }
 
 /** The dialog's two explicit entry modes（导入什么）. */
-type ImportMode = 'sql' | 'archive';
+export type ImportMode = 'sql' | 'archive';
 
 const MODE_TABS: Array<{ id: ImportMode; label: string; hint: string }> = [
   { id: 'sql', label: 'SQL 脚本', hint: '粘贴 DDL · 上传 .sql 文件 · 或将文件拖拽到任意位置' },
@@ -71,7 +65,7 @@ const PLACEHOLDER =
   '  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n' +
   ');';
 
-export function SqlInputDialog({ open, onClose }: Props) {
+export function SqlInputDialog({ open, onClose, initialMode = 'sql', initialFiles = [] }: Props) {
   const setSql = useApp((s) => s.setSql);
   const updateSql = useApp((s) => s.updateSql);
   const importWorkspace = useApp((s) => s.importWorkspace);
@@ -92,40 +86,12 @@ export function SqlInputDialog({ open, onClose }: Props) {
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [unlockRequest, setUnlockRequest] = useState<{
-    content: string;
-    fileName: string;
-  } | null>(null);
-  const unlockResolverRef = useRef<((text: string | null) => void) | null>(null);
+  const unlock = useArchiveUnlock(open);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const samplesMenuRef = useRef<HTMLDivElement | null>(null);
-
-  const requestArchiveUnlock = useCallback((content: string, fileName: string) => {
-    return new Promise<string | null>((resolve) => {
-      unlockResolverRef.current?.(null);
-      unlockResolverRef.current = resolve;
-      setUnlockRequest({ content, fileName });
-    });
-  }, []);
-
-  const closeUnlockDialog = useCallback(() => {
-    unlockResolverRef.current?.(null);
-    unlockResolverRef.current = null;
-    setUnlockRequest(null);
-  }, []);
-
-  // A parent-level close/unmount can happen independently of the nested
-  // password dialog. Always settle its pending file-read promise so a later
-  // import never resumes against stale component state.
-  useEffect(() => {
-    if (!open) closeUnlockDialog();
-    return () => {
-      unlockResolverRef.current?.(null);
-      unlockResolverRef.current = null;
-    };
-  }, [open, closeUnlockDialog]);
+  const handledInitialFilesRef = useRef<readonly File[] | null>(null);
 
   // Resync the editor with persisted SQL each time the dialog opens — the user
   // may have run a different setSql in between, and we don't want to discard
@@ -135,12 +101,12 @@ export function SqlInputDialog({ open, onClose }: Props) {
       setText(currentSql);
       setLoadedFile(null);
       setStaged([]);
-      setMode('sql');
+      setMode(initialMode);
       setPreserveExisting(true);
       setSamplesOpen(false);
       setError(null);
-    }
-  }, [open, currentSql]);
+    } else handledInitialFilesRef.current = null;
+  }, [open, currentSql, initialMode]);
 
   // Auto-focus the textarea on open. Users who hit ⌘I or click 导入 want to
   // start typing/pasting immediately, not chase the cursor with a click.
@@ -201,7 +167,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (unlockRequest) return; // the password dialog owns Escape / Enter
+      if (unlock.request) return; // the password dialog owns Escape / Enter
       if (e.key === 'Escape') {
         e.preventDefault();
         if (samplesOpen) setSamplesOpen(false);
@@ -215,7 +181,7 @@ export function SqlInputDialog({ open, onClose }: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose, submit, samplesOpen, unlockRequest]);
+  }, [open, onClose, submit, samplesOpen, unlock.request]);
 
   // Close samples dropdown on outside click.
   useEffect(() => {
@@ -231,36 +197,41 @@ export function SqlInputDialog({ open, onClose }: Props) {
   // 路由）— an archive lands on the 工作区存档 tab, SQL lands on the SQL tab,
   // switching the dialog there so the user always sees where their file went.
   const handleFiles = useCallback(
-    async (files: File[]) => {
+    async (files: File[], targetMode: ImportMode = mode) => {
       if (files.length === 0) return;
       const archives: StagedArchive[] = [];
-      let sqlFile: { content: string; file: File } | null = null;
+      let sqlFile: { content: string; fileName: string; size: number } | null = null;
+      const inspected = await inspectImportFiles(files, unlock.requestUnlock);
+      if (inspected.cancelled) return;
 
-      for (const file of files) {
-        const originalContent = await file.text();
-        const encrypted = isEncryptedWorkspaceArchive(originalContent);
-        const content = encrypted
-          ? await requestArchiveUnlock(originalContent, file.name)
-          : originalContent;
-        if (content === null) return;
-        if (looksLikeArchive(content)) {
-          const parsed = parseWorkspaceArchive(content);
+      for (const file of inspected.files) {
+        if (file.archive) {
+          const parsed = file.archive;
           if (parsed.ok) {
-            archives.push({ archive: parsed, fileName: file.name, size: file.size, encrypted });
+            archives.push({
+              archive: parsed,
+              fileName: file.fileName,
+              size: file.size,
+              encrypted: file.encrypted,
+            });
             continue;
           }
-          if (file.name.endsWith(ARCHIVE_EXTENSION) || files.length > 1 || mode === 'archive') {
+          if (
+            file.fileName.toLowerCase().endsWith(ARCHIVE_EXTENSION) ||
+            files.length > 1 ||
+            targetMode === 'archive'
+          ) {
             setMode('archive');
-            setError(`无法导入存档 ${file.name}：${parsed.error}`);
+            setError(`无法导入存档 ${file.fileName}：${parsed.error}`);
             return;
           }
         }
-        if (files.length > 1 || mode === 'archive') {
+        if (files.length > 1 || targetMode === 'archive') {
           setMode('archive');
           setError(`合并时只能选择有效的 ${ARCHIVE_EXTENSION} 工作区存档`);
           return;
         }
-        sqlFile = { content, file };
+        sqlFile = { content: file.content, fileName: file.fileName, size: file.size };
       }
 
       if (archives.length > 0) {
@@ -280,14 +251,24 @@ export function SqlInputDialog({ open, onClose }: Props) {
 
       if (sqlFile) {
         setText(sqlFile.content);
-        setLoadedFile({ name: sqlFile.file.name, size: sqlFile.file.size });
+        setLoadedFile({ name: sqlFile.fileName, size: sqlFile.size });
         setMode('sql');
         setError(null);
         requestAnimationFrame(() => textareaRef.current?.focus());
       }
     },
-    [mode, requestArchiveUnlock],
+    [mode, unlock.requestUnlock],
   );
+
+  // Files dropped on the empty workspace can hand off multiple archives to
+  // this dialog. Process each array identity only once; mode changes during
+  // classification must not restart password prompts or duplicate staging.
+  useEffect(() => {
+    if (!open || initialFiles.length === 0 || handledInitialFilesRef.current === initialFiles)
+      return;
+    handledInitialFilesRef.current = initialFiles;
+    void handleFiles([...initialFiles], initialMode);
+  }, [open, initialFiles, initialMode, handleFiles]);
 
   const onPickFile = useCallback(() => fileInputRef.current?.click(), []);
 
@@ -643,19 +624,12 @@ export function SqlInputDialog({ open, onClose }: Props) {
             </button>
           </div>
         </div>
-        {unlockRequest && (
+        {unlock.request && (
           <ArchivePasswordDialog
             mode="decrypt"
-            fileName={unlockRequest.fileName}
-            onClose={closeUnlockDialog}
-            onConfirm={async (password) => {
-              const result = await decryptWorkspaceArchive(unlockRequest.content, password);
-              if (!result.ok) throw new Error(result.error);
-              const resolve = unlockResolverRef.current;
-              unlockResolverRef.current = null;
-              setUnlockRequest(null);
-              resolve?.(result.text);
-            }}
+            fileName={unlock.request.fileName}
+            onClose={unlock.cancel}
+            onConfirm={unlock.confirmPassword}
           />
         )}
       </div>
