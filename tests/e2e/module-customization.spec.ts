@@ -45,7 +45,9 @@ test.beforeEach(async ({ page }) => {
 
 async function selectPair(page: Page) {
   await page.locator('button').filter({ hasText: '编辑' }).first().click();
-  await header(page, 'users').click();
+  // Shift-click both cards: a plain click also centers the canvas, changing
+  // the viewport that the workspace-preservation assertions expect unchanged.
+  await header(page, 'users').click({ modifiers: ['Shift'] });
   await header(page, 'orders').click({ modifiers: ['Shift'] });
   await expect(page.getByText('已选 2 张 · 拖动整组移动')).toBeVisible();
 }
