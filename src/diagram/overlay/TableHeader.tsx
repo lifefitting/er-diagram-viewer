@@ -53,17 +53,14 @@ export function TableHeader({
       </span>
       {shardInfo && (
         <span
-          className="text-[9px] font-medium px-1 py-[1px] rounded bg-white/25 border border-white/30 shrink-0 whitespace-nowrap"
+          className="text-[9px] font-medium px-1 py-[1px] rounded border border-current shrink-0 whitespace-nowrap"
           title={`合并的分表 (${shardInfo.shards.length}):\n${shardInfo.shards.join('\n')}`}
         >
           shards: {shardInfo.shards.length}
         </span>
       )}
       {moduleKey && (
-        <span
-          className="text-[10px] opacity-80 font-normal whitespace-nowrap shrink-0"
-          title={moduleKey}
-        >
+        <span className="text-[10px] font-normal whitespace-nowrap shrink-0" title={moduleKey}>
           {moduleKey}
         </span>
       )}

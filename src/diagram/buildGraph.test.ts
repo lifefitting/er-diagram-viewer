@@ -10,7 +10,8 @@ import {
   FIELD_ROW_HEIGHT,
   type BuildDisplayOpts,
 } from './buildGraph';
-import { inferModules } from '../infer/inferModules';
+import { inferModules, type PaletteName } from '../infer/inferModules';
+import { darkEdgeColor } from './edgeColor';
 
 const col = (name: string, over: Partial<Column> = {}): Column => ({
   name,
@@ -147,8 +148,15 @@ describe('edge dark-canvas color (colorDark)', () => {
     confidence: 'high',
   };
 
-  function edgeColors(palette: 'professional' | 'vibrant') {
+  function edgeColors(palette: PaletteName, legacy = false) {
     const modules = inferModules(schema, [fk], palette);
+    if (legacy) {
+      for (const mod of modules.ordered) {
+        mod.color = { ...mod.color };
+        delete mod.color.edgeLight;
+        delete mod.color.headerDark;
+      }
+    }
     const { elements } = buildElements(schema, [fk], {
       modules,
       collapsed: {},
@@ -163,18 +171,27 @@ describe('edge dark-canvas color (colorDark)', () => {
   it("prefers the module's hand-stepped headerDark over the automatic lift", () => {
     const { modules, color, colorDark } = edgeColors('professional');
     const mod = modules.modules.get(modules.byTable.get('orders')!)!;
-    expect(color).toBe(mod.color.header);
+    expect(color).toBe(mod.color.edgeLight);
     expect(colorDark).toBe(mod.color.headerDark);
     expect(colorDark).not.toBe(color);
   });
 
   it('falls back to the lightness lift for palettes without explicit dark steps', () => {
-    const { modules, colorDark } = edgeColors('vibrant');
+    const { modules, color, colorDark } = edgeColors('vibrant', true);
     const mod = modules.modules.get(modules.byTable.get('orders')!)!;
     expect(mod.color.headerDark).toBeUndefined();
     // The lift keeps already-light colors and only raises dark ones — either
     // way the result must parse as a hex color.
-    expect(colorDark).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(color).toBe(mod.color.header);
+    expect(colorDark).toBe(darkEdgeColor(color));
+  });
+
+  it('uses independent connector shades with pale headers', () => {
+    const { modules, color, colorDark } = edgeColors('pastel');
+    const mod = modules.modules.get(modules.byTable.get('orders')!)!;
+    expect(color).toBe(mod.color.edgeLight);
+    expect(color).not.toBe(mod.color.header);
+    expect(colorDark).toBe(mod.color.headerDark);
   });
 });
 

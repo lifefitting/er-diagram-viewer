@@ -1,21 +1,14 @@
 import type { ForeignKey, Schema } from '../parser/types';
 import { singularize } from './nameMatching';
-
-export interface ModuleColor {
-  /** Header background (used for table top bar and edge color). */
-  header: string;
-  /** Border around the table card. */
-  border: string;
-  /** Light tint, suitable for backgrounds / chips. */
-  tint: string;
-  /** Header text color (white / dark depending on contrast). */
-  text: string;
-  /** Dark-canvas edge color, hand-stepped for the dark background. When absent
-   *  the edge falls back to the automatic HSL lift (`darkEdgeColor`), which
-   *  preserves saturation and can turn saturated dark hues neon — palettes
-   *  designed for both modes should provide explicit steps instead. */
-  headerDark?: string;
-}
+import { PALETTE_OPTIONS, PALETTE_HEADER_TEXT, type PaletteName } from './paletteCatalog';
+import {
+  createModuleColor,
+  paletteColorAt,
+  readableModuleColor,
+  type ModuleColor,
+} from './paletteColor';
+export type { PaletteName } from './paletteCatalog';
+export type { ModuleColor } from './paletteColor';
 
 export interface ModuleInfo {
   /** Canonical module key (lowercase, after prefix-stripping). */
@@ -25,6 +18,7 @@ export interface ModuleInfo {
   /** Member table names (original casing as in schema). */
   tables: string[];
   color: ModuleColor;
+  custom?: boolean;
 }
 
 export interface ModulesResult {
@@ -36,17 +30,16 @@ export interface ModulesResult {
   ordered: ModuleInfo[];
 }
 
-export type PaletteName = 'professional' | 'vibrant' | 'pastel' | 'earth' | 'mono';
-
 /**
- * Five hand-tuned palettes, each with 12 distinct slots. All palettes keep header
- * text legible (white on dark headers, ink on light headers) and pair a darker
- * `header` with a lighter `border` and a near-white `tint` so the same module
- * color renders consistently across the table card, the edge line, and chips.
+ * Eight palettes, each with 12 primary slots. All palettes keep header
+ * text legible (white on dark headers, ink on light headers), with independent
+ * light/dark connector shades checked at regular-edge opacity. Header hues
+ * remain shared by table cards and module chips.
  */
-export const MODULE_PALETTES: Record<PaletteName, ModuleColor[]> = {
+const BASE_PALETTES: Record<PaletteName, ModuleColor[]> = {
   // Professional (default): desaturated OKLCH-designed hues for review work.
-  // Machine-validated, not eyeballed (see docs/palette-professional.md):
+  // Original design constraints (see docs/palette-professional.md); final
+  // connector shades are normalized below (see docs/palette-readability.md):
   //   - headers sit in OKLCH L 0.43–0.58, C ≥ 0.10 (chromatic, never neon);
   //   - white header text ≥ 4.5:1 on every slot (WCAG AA for 13px text);
   //   - slot order maximizes the minimum adjacent CVD ΔE (Machado protan/
@@ -141,7 +134,51 @@ export const MODULE_PALETTES: Record<PaletteName, ModuleColor[]> = {
       headerDark: '#cb738f',
     }, // rose
   ],
-  // Vibrant: saturated Tailwind 600-tier hues. Default / loudest.
+  qingci: [
+    ['#087f8c', '#55b8c2'],
+    ['#b64f35', '#e58b70'],
+    ['#6452a8', '#a794dd'],
+    ['#ac4454', '#df8f9a'],
+    ['#3c5594', '#8d9fd0'],
+    ['#846044', '#c4a182'],
+    ['#2f6c98', '#77a7d0'],
+    ['#74672f', '#b8ac71'],
+    ['#276f64', '#78b7ac'],
+    ['#91660f', '#cca753'],
+    ['#397647', '#83b58d'],
+    ['#8d4478', '#ce87bb'],
+  ].map(([header, dark]) => createModuleColor(header, dark)),
+  twilight: [
+    ['#6d4bc3', '#ae95ed'],
+    ['#ad3f70', '#e188b1'],
+    ['#637a2b', '#a6bc6e'],
+    ['#86428a', '#c895cd'],
+    ['#227956', '#7ab599'],
+    ['#9a6418', '#d5a95c'],
+    ['#3e4b86', '#9aabd8'],
+    ['#984153', '#d68b9c'],
+    ['#365da8', '#85a3db'],
+    ['#a44c32', '#df9379'],
+    ['#176b84', '#5dadc5'],
+    ['#74643a', '#c2ac7c'],
+  ].map(([header, dark]) => createModuleColor(header, dark)),
+  // First six headers reference Paul Tol Bright. The extra six and connector
+  // adaptations are ours; this is not a claim of all-pairs CVD safety.
+  contrast: [
+    ['#4477aa', '#79a9d8'],
+    ['#ee6677', '#ee8797'],
+    ['#228833', '#61b871'],
+    ['#ccbb44', '#d8c967'],
+    ['#66ccee', '#77d3ef'],
+    ['#aa3377', '#d787b3'],
+    ['#765238', '#b9a08c'],
+    ['#332288', '#9b8fcd'],
+    ['#b95e18', '#dca36c'],
+    ['#117766', '#70bbaa'],
+    ['#667b22', '#b1c474'],
+    ['#882255', '#cb85a7'],
+  ].map(([header, dark]) => createModuleColor(header, dark)),
+  // Vibrant: saturated Tailwind 600-tier hues.
   vibrant: [
     { header: '#2563eb', border: '#60a5fa', tint: '#dbeafe', text: '#ffffff' }, // blue
     { header: '#ea580c', border: '#fb923c', tint: '#ffedd5', text: '#ffffff' }, // orange
@@ -203,21 +240,26 @@ export const MODULE_PALETTES: Record<PaletteName, ModuleColor[]> = {
   ],
 };
 
+/** Keep one foreground per palette. Adjust backgrounds only where needed for
+ * contrast, without changing slot order or module assignment. */
+export const MODULE_PALETTES = Object.fromEntries(
+  PALETTE_OPTIONS.map(({ id }) => [
+    id,
+    BASE_PALETTES[id].map((color) =>
+      readableModuleColor({ ...color, text: PALETTE_HEADER_TEXT[id] }),
+    ),
+  ]),
+) as Record<PaletteName, ModuleColor[]>;
+
 export const DEFAULT_PALETTE: PaletteName = 'professional';
 
-const FALLBACK_COLORS: Record<PaletteName, ModuleColor> = {
-  professional: {
-    header: '#4b5563',
-    border: '#9ca3af',
-    tint: '#f1f3f5',
-    text: '#ffffff',
-    headerDark: '#8b95a5',
-  },
-  vibrant: { header: '#3f465e', border: '#7a82a0', tint: '#eceef2', text: '#ffffff' },
-  pastel: { header: '#cbd5e1', border: '#e2e8f0', tint: '#f8fafc', text: '#1f2937' },
-  earth: { header: '#57534e', border: '#a8a29e', tint: '#f5f5f4', text: '#fafaf9' },
-  mono: { header: '#475569', border: '#64748b', tint: '#e2e8f0', text: '#f8fafc' },
-};
+const FALLBACK_COLOR = readableModuleColor({
+  header: '#4b5563',
+  border: '#9ca3af',
+  tint: '#f1f3f5',
+  text: '#ffffff',
+  headerDark: '#8b95a5',
+});
 
 const COMMON_PREFIXES = ['t_', 'tbl_', 'tb_'];
 
@@ -302,7 +344,6 @@ export function inferModules(
     return { byTable: new Map(), modules: new Map(), ordered: [] };
   }
   const paletteColors = MODULE_PALETTES[palette] ?? MODULE_PALETTES[DEFAULT_PALETTE];
-  const fallbackColor = FALLBACK_COLORS[palette] ?? FALLBACK_COLORS[DEFAULT_PALETTE];
 
   const seedByTable = new Map<string, string>();
   const seedCount = new Map<string, number>();
@@ -371,7 +412,7 @@ export function inferModules(
   const modules = new Map<string, ModuleInfo>();
   const ordered: ModuleInfo[] = [];
   moduleKeys.forEach((key, idx) => {
-    const color = paletteColors[idx] ?? fallbackColor;
+    const color = paletteColorAt(paletteColors, idx);
     const info: ModuleInfo = { name: key, label: titleCase(key), tables: [], color };
     modules.set(key, info);
     ordered.push(info);
@@ -391,7 +432,12 @@ export function colorForTableModule(
   modules: Map<string, ModuleInfo>,
 ): ModuleColor {
   const key = byTable.get(tableName);
-  const fallback = FALLBACK_COLORS[DEFAULT_PALETTE];
-  if (!key) return fallback;
-  return modules.get(key)?.color ?? fallback;
+  if (!key) return FALLBACK_COLOR;
+  return modules.get(key)?.color ?? FALLBACK_COLOR;
+}
+
+/** Never expose a persisted custom UUID as the user-visible table label. */
+export function moduleDisplayLabel(key: string, modules: Map<string, ModuleInfo>): string {
+  const module = modules.get(key);
+  return module?.custom ? module.label : key;
 }

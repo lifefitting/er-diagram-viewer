@@ -164,8 +164,11 @@ export function mergeWorkspaceArchives(
       source.archive.state.rawSql,
       sourcePalette,
       source.archive.state.logicalKeys ?? [],
+      source.archive.state.workspaceGroups ?? [],
+      source.archive.state.moduleOverrides ?? {},
+      source.archive.state,
     );
-    return { ...source, palette: sourcePalette, schema: result.schema };
+    return { ...source, palette: sourcePalette, schema: result.schema, modules: result.modules };
   });
 
   // nodeId lowercases table names, so this also catches case-only collisions
@@ -194,6 +197,8 @@ export function mergeWorkspaceArchives(
   const nodePositions: Record<string, Point> = {};
   const manualRoutes: Record<string, Point[]> = {};
   const moduleOverrides: Record<string, string> = {};
+  const customModules: AppState['customModules'] = {};
+  const moduleColors: AppState['moduleColors'] = {};
   const workspaceGroups: WorkspaceGroup[] = [];
 
   parsedSources.forEach((source, index) => {
@@ -230,6 +235,12 @@ export function mergeWorkspaceArchives(
     // corrected grouping survives archive merge as well as plain import.
     for (const [id, targetKey] of Object.entries(source.archive.state.moduleOverrides ?? {})) {
       if (idSet.has(id)) moduleOverrides[id] = `${groupId}:${targetKey}`;
+    }
+    for (const [key, definition] of Object.entries(source.archive.state.customModules ?? {})) {
+      customModules[`${groupId}:${key}`] = { ...definition };
+    }
+    for (const [key, color] of Object.entries(source.archive.state.moduleColors ?? {})) {
+      moduleColors[`${groupId}:${key}`] = color;
     }
     workspaceGroups.push({
       id: groupId,
@@ -305,6 +316,8 @@ export function mergeWorkspaceArchives(
     palette,
     logicalKeys: [],
     moduleOverrides,
+    customModules,
+    moduleColors,
     workspaceGroups,
     decisions,
     manualFks: [...manualByKey.values()],
@@ -321,7 +334,40 @@ export function mergeWorkspaceArchives(
 
   // Final pre-flight uses the exact scoped pipeline the imported store will
   // use, catching any concatenation/parser drift before current state changes.
-  const merged = runPipeline(rawSql, palette, [], workspaceGroups, moduleOverrides);
+  const merged = runPipeline(rawSql, palette, [], workspaceGroups, moduleOverrides, {
+    customModules,
+    moduleColors,
+  });
+  // Re-merging a previously merged archive can flatten its old inference
+  // scopes. Fail closed when a live manual choice cannot be represented;
+  // never accept the merge and silently discard that choice. Dormant colors
+  // are still retained for reuse and do not prevent a merge.
+  const customizationConflicts: string[] = [];
+  parsedSources.forEach((source, index) => {
+    const prefix = sourceId(sourceLabel(source.fileName), index);
+    for (const key of Object.keys(source.archive.state.moduleColors ?? {})) {
+      if (source.modules.modules.has(key) && !merged.modules.modules.has(`${prefix}:${key}`))
+        customizationConflicts.push(
+          `${source.fileName}: 模块颜色 ${source.modules.modules.get(key)!.label}`,
+        );
+    }
+    for (const table of source.schema.tables) {
+      const target = source.archive.state.moduleOverrides?.[nodeId(table.name)];
+      if (
+        target &&
+        source.modules.byTable.get(table.name) === target &&
+        merged.modules.byTable.get(table.name) !== `${prefix}:${target}`
+      )
+        customizationConflicts.push(`${source.fileName}: ${table.name} 的人工分组`);
+    }
+  });
+  if (customizationConflicts.length > 0) {
+    return {
+      ok: false,
+      error: '再次合并时无法保留部分模块分组或配色，已取消以保护当前工作区；请单独打开该存档',
+      conflicts: customizationConflicts,
+    };
+  }
   const expectedIds = new Set(workspaceGroups.flatMap((group) => group.nodeIds));
   const actualIds = new Set(merged.schema.tables.map((table) => nodeId(table.name)));
   if (expectedIds.size !== actualIds.size || [...expectedIds].some((id) => !actualIds.has(id))) {

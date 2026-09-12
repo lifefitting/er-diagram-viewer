@@ -1,6 +1,6 @@
 import type { ElementDefinition } from 'cytoscape';
 import type { Column, ForeignKey, Schema, Table } from '../parser/types';
-import { colorForTableModule, type ModulesResult } from '../infer/inferModules';
+import { colorForTableModule, moduleDisplayLabel, type ModulesResult } from '../infer/inferModules';
 import { fkKey } from '../infer/inferForeignKeys';
 import { darkEdgeColor } from './edgeColor';
 import { nodeId } from './nodeId';
@@ -298,11 +298,12 @@ export function buildElements(
   for (const table of schema.tables) {
     const isCollapsed = !!collapsed[table.name];
     const moduleKey = modules.byTable.get(table.name) ?? '';
+    const moduleLabel = moduleDisplayLabel(moduleKey, modules.modules);
     const { width, height } = tableBoxSize(
       table,
       isCollapsed,
       display,
-      moduleKey,
+      moduleLabel,
       tableWidths[table.name],
     );
     widthByTable.set(table.name, width);
@@ -314,6 +315,7 @@ export function buildElements(
         type: 'table',
         rawName: table.name,
         moduleKey,
+        moduleLabel,
         moduleColor: color.header,
         boxWidth: width,
         boxHeight: height,
@@ -363,9 +365,10 @@ export function buildElements(
     // referencing table (it "carries" the foreign reference), so reading the
     // diagram from the FK column outward, the line should match the card it
     // leaves rather than the card it lands on. This also keeps all FKs that
-    // originate from the same table visually consistent.
+    // originate from the same table visually consistent. The light connector
+    // shade is independent of the header so pastel headers can stay pale.
     const moduleColor = colorForTableModule(fk.fromTable, modules.byTable, modules.modules);
-    const color = moduleColor.header;
+    const color = moduleColor.edgeLight ?? moduleColor.header;
 
     const srcTable = tableByName.get(fk.fromTable);
     const tgtTable = tableByName.get(fk.toTable);
@@ -400,11 +403,8 @@ export function buildElements(
         // started the drag from, defaulting to the right.
         loopSide: fk.fromTable === fk.toTable ? (fk.drawSide ?? 'right') : '',
         color,
-        // Dark-canvas-safe variant of `color`. Palettes designed for both
-        // modes ship an explicit hand-stepped `headerDark`; the rest fall back
-        // to the automatic lightness lift (mono, earth, darker vibrant). The
-        // canvas swaps to this in dark mode; light-mode + light exports keep
-        // `color`.
+        // All built-in palettes now supply contrast-checked light/dark edge
+        // shades. Keep the automatic lift for legacy/custom ModuleColor values.
         colorDark: moduleColor.headerDark ?? darkEdgeColor(color),
         crossModule: sameModule ? 'no' : 'yes',
         srcRowIdx,

@@ -25,7 +25,7 @@ export function smoothFrameInterval(previous: number | null, interval: number): 
 }
 
 function interactionLabel(interaction: FpsInteraction): string {
-  return interaction === 'pan' ? 'CANVAS PAN' : 'TABLE DRAG';
+  return interaction === 'pan' ? 'CANVAS PAN / ZOOM' : 'TABLE DRAG';
 }
 
 function meterTone(fps: number | null): { dot: string; value: string } {
@@ -56,6 +56,7 @@ export const InteractionFpsHud = forwardRef<InteractionFpsHudHandle>(
 
     const start = useCallback(
       (interaction: FpsInteraction) => {
+        if (interactionRef.current === interaction) return;
         clearNoMovementTimer();
         interactionRef.current = interaction;
         previousFrameAtRef.current = null;
@@ -72,6 +73,9 @@ export const InteractionFpsHud = forwardRef<InteractionFpsHudHandle>(
         if (!interaction) return;
 
         const previous = previousFrameAtRef.current;
+        // Geometry and dragged-node flushes can share one animation frame.
+        // Count it once rather than injecting a zero interval into the meter.
+        if (previous != null && timestamp <= previous) return;
         previousFrameAtRef.current = timestamp;
 
         if (previous != null) {
@@ -102,7 +106,7 @@ export const InteractionFpsHud = forwardRef<InteractionFpsHudHandle>(
 
     const stop = useCallback(
       (interaction?: FpsInteraction) => {
-        // Debounced wheel sessions stop asynchronously. Do not let an old wheel
+        // Debounced viewport sessions stop asynchronously. Do not let an old camera
         // timer hide a newer table-drag (or another future interaction kind).
         if (interaction && interactionRef.current !== interaction) return;
         interactionRef.current = null;

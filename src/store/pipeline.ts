@@ -3,7 +3,14 @@ import type { ForeignKey, Schema } from '../parser/types';
 import { canonicalFkKey } from '../parser/utils';
 import { inferForeignKeys, type InferredFK } from '../infer/inferForeignKeys';
 import { inferLogicalLinks } from '../infer/inferLogicalLinks';
-import { inferModules, type ModulesResult, type PaletteName } from '../infer/inferModules';
+import {
+  inferModules,
+  MODULE_PALETTES,
+  type ModulesResult,
+  type PaletteName,
+} from '../infer/inferModules';
+import { createModuleColor, paletteColorAt } from '../infer/paletteColor';
+import { validModuleColor, type ModuleCustomization } from '../infer/moduleCustomization';
 import { mergeShardedTables } from '../infer/mergeShardedTables';
 import { nodeId } from '../diagram/nodeId';
 import type { WorkspaceGroup } from './types';
@@ -17,6 +24,7 @@ export function recomputeModules(
   palette: PaletteName,
   workspaceGroups: readonly WorkspaceGroup[] = [],
   moduleOverrides: Readonly<Record<string, string>> = {},
+  customization: Partial<ModuleCustomization> = {},
 ): ModulesResult {
   if (!schema) return EMPTY_MODULES;
   // Use explicit FKs plus inferred FKs of medium+ confidence so the topology
@@ -30,7 +38,12 @@ export function recomputeModules(
     ...inferred.filter((f) => f.confidence !== 'low' && f.kind !== 'logical'),
   ];
   if (workspaceGroups.length === 0) {
-    return applyModuleOverrides(inferModules(schema, fks, palette), schema, moduleOverrides);
+    return customizeModules(
+      inferModules(schema, fks, palette),
+      schema,
+      moduleOverrides,
+      customization,
+    );
   }
 
   // A merged workspace keeps module grouping and palette assignment inside
@@ -86,7 +99,40 @@ export function recomputeModules(
       'workspace',
     );
   }
-  return applyModuleOverrides({ byTable, modules, ordered }, schema, moduleOverrides);
+  return customizeModules({ byTable, modules, ordered }, schema, moduleOverrides, customization);
+}
+
+function customizeModules(
+  baseline: ModulesResult,
+  schema: Schema,
+  overrides: Readonly<Record<string, string>>,
+  { customModules = {}, moduleColors = {} }: Partial<ModuleCustomization>,
+): ModulesResult {
+  const modules = new Map(baseline.modules);
+  for (const [key, definition] of Object.entries(customModules)) {
+    if (modules.has(key)) continue;
+    modules.set(key, {
+      name: key,
+      label: definition.label,
+      custom: true,
+      tables: [],
+      color: paletteColorAt(MODULE_PALETTES[definition.palette], definition.colorIndex),
+    });
+  }
+  const assigned = applyModuleOverrides(
+    { ...baseline, modules, ordered: [...modules.values()] },
+    schema,
+    overrides,
+  );
+  const ordered = assigned.ordered
+    .filter((module) => module.tables.length > 0)
+    .map((module) => {
+      const requested = moduleColors[module.name];
+      return validModuleColor(requested)
+        ? { ...module, color: createModuleColor(requested, undefined, module.color.text) }
+        : module;
+    });
+  return { ...assigned, ordered, modules: new Map(ordered.map((m) => [m.name, m])) };
 }
 
 /** Apply persisted, user-selected assignments over an inferred module graph.
@@ -207,6 +253,7 @@ export function runPipeline(
   logicalKeys: readonly string[] = [],
   workspaceGroups: readonly WorkspaceGroup[] = [],
   moduleOverrides: Readonly<Record<string, string>> = {},
+  customization: Partial<ModuleCustomization> = {},
 ): { schema: Schema; inferred: InferredFK[]; modules: ModulesResult } {
   return derivePipeline(
     parseAndMergeSql(sql),
@@ -214,6 +261,7 @@ export function runPipeline(
     logicalKeys,
     workspaceGroups,
     moduleOverrides,
+    customization,
   );
 }
 
@@ -253,9 +301,17 @@ export function derivePipeline(
   logicalKeys: readonly string[] = [],
   workspaceGroups: readonly WorkspaceGroup[] = [],
   moduleOverrides: Readonly<Record<string, string>> = {},
+  customization: Partial<ModuleCustomization> = {},
 ): { schema: Schema; inferred: InferredFK[]; modules: ModulesResult } {
   return measureRuntimeStage('er:pipeline:derive', () =>
-    derivePipelineUnmeasured(merged, palette, logicalKeys, workspaceGroups, moduleOverrides),
+    derivePipelineUnmeasured(
+      merged,
+      palette,
+      logicalKeys,
+      workspaceGroups,
+      moduleOverrides,
+      customization,
+    ),
   );
 }
 
@@ -265,6 +321,7 @@ function derivePipelineUnmeasured(
   logicalKeys: readonly string[],
   workspaceGroups: readonly WorkspaceGroup[],
   moduleOverrides: Readonly<Record<string, string>>,
+  customization: Partial<ModuleCustomization>,
 ): { schema: Schema; inferred: InferredFK[]; modules: ModulesResult } {
   let inferredFk: InferredFK[];
   if (workspaceGroups.length === 0) {
@@ -320,6 +377,13 @@ function derivePipelineUnmeasured(
   if (notices.length > 0) {
     schema = { ...merged, notices: [...(merged.notices ?? []), ...notices] };
   }
-  const modules = recomputeModules(schema, inferred, palette, workspaceGroups, moduleOverrides);
+  const modules = recomputeModules(
+    schema,
+    inferred,
+    palette,
+    workspaceGroups,
+    moduleOverrides,
+    customization,
+  );
   return { schema, inferred, modules };
 }

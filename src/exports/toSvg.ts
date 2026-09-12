@@ -1,7 +1,7 @@
 import type { Core } from 'cytoscape';
 import type { Schema, Table } from '../parser/types';
 import type { ModulesResult } from '../infer/inferModules';
-import { colorForTableModule } from '../infer/inferModules';
+import { colorForTableModule, moduleDisplayLabel } from '../infer/inferModules';
 import type { DisplayOptions } from '../store';
 import {
   columnRoleBadge,
@@ -164,7 +164,7 @@ export function buildDiagramSvg(cy: Core, opts: SvgRenderOpts): string {
       y: pos.y - h / 2,
       w,
       h,
-      moduleKey,
+      moduleKey: moduleDisplayLabel(moduleKey, modules.modules),
       header: color.header,
       border: color.border,
       text: color.text,
@@ -369,7 +369,7 @@ function renderNode(
     const mw = measureText(n.moduleKey, 10);
     parts.push(
       `<text x="${fmt(rightCursor)}" y="${fmt(nameY - 0.5)}" font-size="10" ` +
-        `text-anchor="end" fill="${escapeAttr(n.text)}" opacity="0.85">${escapeText(n.moduleKey)}</text>`,
+        `text-anchor="end" fill="${escapeAttr(n.text)}">${escapeText(n.moduleKey)}</text>`,
     );
     rightCursor -= mw + 8;
   }
@@ -379,7 +379,7 @@ function renderNode(
     parts.push(
       `<rect x="${fmt(rightCursor - sw)}" y="${fmt(HEADER_HEIGHT / 2 - 7)}" ` +
         `width="${fmt(sw)}" height="13" rx="3" ry="3" ` +
-        `fill="rgba(255,255,255,0.25)" stroke="rgba(255,255,255,0.3)"/>`,
+        `fill="none" stroke="${escapeAttr(n.text)}"/>`,
     );
     parts.push(
       `<text x="${fmt(rightCursor - sw / 2)}" y="${fmt(HEADER_HEIGHT / 2 + 3)}" font-size="9" ` +

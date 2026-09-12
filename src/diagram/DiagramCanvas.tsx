@@ -14,7 +14,8 @@ import { manualFkFromDraft, validateManualFk, type ManualFkDraft } from '../stor
 import { fieldNoteKey, formatNoteTime, NOTE_SEVERITIES, NOTE_STATUSES } from '../store/notesSlice';
 import type { FieldNote, NoteSeverity, NoteStatus } from '../store/types';
 import type { Table } from '../parser/types';
-import { colorForTableModule, type ModulesResult } from '../infer/inferModules';
+import { colorForTableModule, moduleDisplayLabel, type ModulesResult } from '../infer/inferModules';
+import { SelectionModuleControl } from './selection/SelectionModuleControl';
 import {
   bindView,
   unbindView,
@@ -30,6 +31,7 @@ import type { NodePos, OverlayState, Selection } from './types';
 import { TableOverlay } from './overlay/TableOverlay';
 import { applyOverlayGeometry } from './overlay/overlayGeometry';
 import { InteractionFpsHud, type InteractionFpsHudHandle } from './overlay/InteractionFpsHud';
+import { createViewportFpsTracker } from './overlay/viewportFps';
 import { RouteHandles } from './overlay/RouteHandles';
 import { runLayout } from './layout/runLayout';
 import { placeIncrementalNodes } from './layout/incrementalLayout';
@@ -802,7 +804,7 @@ export function DiagramCanvas() {
           w: bb.w,
           h: bb.h,
           moduleColor,
-          moduleKey,
+          moduleKey: moduleDisplayLabel(moduleKey, mods.modules),
         };
         pos.push(next);
         liveIds.add(next.id);
@@ -818,6 +820,15 @@ export function DiagramCanvas() {
       if (publishModels) setPositions(pos);
     };
     syncOverlaysRef.current = syncPositions;
+    const readViewport = () => ({ ...cy.pan(), zoom: cy.zoom() });
+    const viewportFps = createViewportFpsTracker(
+      readViewport(),
+      () => fpsHudRef.current?.start('pan'),
+      () => fpsHudRef.current?.stop('pan'),
+    );
+    // Search navigation, module locate, fit, zoom controls and pointer input all
+    // reach these camera events. Sampling stays at the actual geometry flush.
+    cy.on('pan zoom', () => viewportFps.update(readViewport(), !nodeDraggingRef.current));
     let geometryRafId: number | undefined;
     const scheduleGeometry = () => {
       if (geometryRafId !== undefined) return;
@@ -832,6 +843,16 @@ export function DiagramCanvas() {
     // Camera changes only mutate registered root styles. No table/column React
     // subtree is reconciled while the user pans, zooms, drags or resizes.
     cy.on('pan zoom resize', scheduleGeometry);
+    // Moving a window between monitors (or changing browser zoom) can change
+    // DPR without a camera event. Re-snap the display origin to the new screen.
+    let resolutionQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    const onResolutionChange = () => {
+      resolutionQuery.removeEventListener('change', onResolutionChange);
+      resolutionQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      resolutionQuery.addEventListener('change', onResolutionChange);
+      scheduleGeometry();
+    };
+    resolutionQuery.addEventListener('change', onResolutionChange);
     cy.on('layoutstop', () => {
       scheduleGeometry();
       setPositionRevision((revision) => revision + 1);
@@ -977,22 +998,6 @@ export function DiagramCanvas() {
     // everywhere in the canvas area. The zoom focal point still uses the cy
     // container's rect (that's the viewport cytoscape's renderedPosition is in).
     const wheelTarget = container.parentElement ?? container;
-    let wheelFpsActive = false;
-    let wheelFpsStopTimer: number | undefined;
-    const noteWheelMovement = () => {
-      if (!wheelFpsActive) {
-        wheelFpsActive = true;
-        fpsHudRef.current?.start('pan');
-      }
-      if (wheelFpsStopTimer !== undefined) window.clearTimeout(wheelFpsStopTimer);
-      wheelFpsStopTimer = window.setTimeout(() => {
-        wheelFpsStopTimer = undefined;
-        wheelFpsActive = false;
-        // A table drag may have started while the wheel timer was pending.
-        // Scope the stop so this old session cannot hide the newer HUD.
-        fpsHudRef.current?.stop('pan');
-      }, 180);
-    };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (e.ctrlKey) {
@@ -1004,13 +1009,11 @@ export function DiagramCanvas() {
         const factor = Math.min(1.2, Math.max(0.8, Math.exp(-e.deltaY * 0.01)));
         const next = Math.min(cy.maxZoom(), Math.max(cy.minZoom(), cy.zoom() * factor));
         if (Math.abs(next - cy.zoom()) < 0.000_001) return;
-        noteWheelMovement();
         cy.zoom({ level: next, renderedPosition: rendered });
       } else {
         const cur = cy.pan();
         const next = clampPan(cy, { x: cur.x - e.deltaX, y: cur.y - e.deltaY });
         if (next.x === cur.x && next.y === cur.y) return;
-        noteWheelMovement();
         cy.pan(next);
       }
     };
@@ -1027,9 +1030,10 @@ export function DiagramCanvas() {
       // Cancel a pending drag-flush rAF so it can't fire against the destroyed cy.
       if (posRafId !== undefined) cancelAnimationFrame(posRafId);
       if (geometryRafId !== undefined) cancelAnimationFrame(geometryRafId);
+      resolutionQuery.removeEventListener('change', onResolutionChange);
       syncOverlaysRef.current = null;
       wheelTarget.removeEventListener('wheel', onWheel);
-      if (wheelFpsStopTimer !== undefined) clearTimeout(wheelFpsStopTimer);
+      viewportFps.dispose();
       if (saveTimer !== undefined) clearTimeout(saveTimer);
       // Cancel a pending hide-handles timer too, so its setHoveredEdgeId(null)
       // can't fire after the component is gone (and leak the timer).
@@ -1052,7 +1056,7 @@ export function DiagramCanvas() {
   useEffect(() => {
     const fromControl = (t: EventTarget | null) =>
       t instanceof HTMLElement &&
-      !!t.closest('input, textarea, button, a, [contenteditable="true"]');
+      !!t.closest('input, textarea, select, button, a, [contenteditable="true"]');
     const onKeyDown = (e: KeyboardEvent) => {
       if (fromControl(e.target)) return;
       const meta = e.metaKey || e.ctrlKey;
@@ -1303,7 +1307,8 @@ export function DiagramCanvas() {
         const t = tableByIdRef.current.get(n.id());
         if (!t) return;
         const isCollapsed = !!collapsed[t.name];
-        const moduleKey = (n.data('moduleKey') as string) ?? '';
+        const moduleKey =
+          (n.data('moduleLabel') as string) ?? (n.data('moduleKey') as string) ?? '';
         const { width, height } = tableBoxSize(
           t,
           isCollapsed,
@@ -1521,7 +1526,7 @@ export function DiagramCanvas() {
         }
         return;
       }
-      fpsHudRef.current?.stop();
+      fpsHudRef.current?.stop('table');
       // Moving a node tears its connector ports away from any hand-edited bends,
       // so drop the overrides for every edge touching a moved card — those edges
       // re-auto-route. (Only here + onTableResize; never on the cy 'position'
@@ -1657,16 +1662,8 @@ export function DiagramCanvas() {
       // capturing it directly would make `startPan.x` mutate as we pan and the
       // delta accumulate (the drag would fly off-screen). Spread to snapshot it.
       const startPan = { ...cy.pan() };
-      let fpsStarted = false;
       setPanning(true);
       const onMove = (mv: MouseEvent) => {
-        if (
-          !fpsStarted &&
-          Math.abs(mv.clientX - startClient.x) + Math.abs(mv.clientY - startClient.y) > 3
-        ) {
-          fpsStarted = true;
-          fpsHudRef.current?.start('pan');
-        }
         cy.pan(
           clampPan(cy, {
             x: startPan.x + (mv.clientX - startClient.x),
@@ -1675,7 +1672,6 @@ export function DiagramCanvas() {
         );
       };
       const onUp = () => {
-        if (fpsStarted) fpsHudRef.current?.stop();
         setPanning(false);
       };
       beginDrag(onMove, onUp);
@@ -2330,38 +2326,12 @@ export function DiagramCanvas() {
             }
             onSelect={arrangeSelectedTables}
           />
-          <label className="pointer-events-auto inline-flex items-center gap-1">
-            <span className="sr-only">批量修改所属模块</span>
-            <select
-              aria-label="批量修改所属模块"
-              className="max-w-[190px] rounded-full border border-ink-200 bg-white px-2 py-0.5 text-[11px] text-ink-700 outline-none transition-colors hover:border-ink-300 focus:border-blue-400 dark:border-inkd-300 dark:bg-inkd-100 dark:text-inkd-700"
-              value={selectedModuleKey}
-              onChange={(event) => {
-                const targetKey = event.target.value;
-                const restoreAuto = targetKey === '__auto__';
-                useApp
-                  .getState()
-                  .assignTablesToModule([...selectedIds], restoreAuto ? null : targetKey);
-                const target = modules.modules.get(targetKey);
-                showConnectNotice(
-                  restoreAuto
-                    ? `已恢复 ${selectedIds.size} 张表的自动分组`
-                    : `已将 ${selectedIds.size} 张表移到「${target?.label ?? targetKey}」`,
-                  'ok',
-                );
-              }}
-            >
-              <option value="" disabled>
-                多个模块 · 批量调整…
-              </option>
-              {modules.ordered.map((module) => (
-                <option key={module.name} value={module.name}>
-                  移到 {module.label}
-                </option>
-              ))}
-              <option value="__auto__">恢复自动分组</option>
-            </select>
-          </label>
+          <SelectionModuleControl
+            selectedIds={selectedIds}
+            current={selectedModuleKey}
+            modules={modules}
+            onNotice={(message) => showConnectNotice(message, 'ok')}
+          />
           <button
             type="button"
             className="pointer-events-auto inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"

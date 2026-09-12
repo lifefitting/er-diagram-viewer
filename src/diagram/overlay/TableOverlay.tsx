@@ -7,6 +7,7 @@ import type { NodePos, OverlayState } from '../types';
 import { ColumnRow } from './ColumnRow';
 import { TableHeader } from './TableHeader';
 import { highlightMatch } from './highlight';
+import { overlayTransform } from './overlayGeometry';
 
 interface TableOverlayProps {
   pos: NodePos;
@@ -210,10 +211,9 @@ function TableOverlayComponent({
       style={{
         left: 0,
         top: 0,
-        transform: `translate3d(${x}px, ${y}px, 0)`,
+        transform: overlayTransform(x, y),
         width: w,
         height: h,
-        willChange: 'transform',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         border: `1px solid ${moduleColor.border}`,
         // In pan mode the card is click-through so a drag pans the canvas

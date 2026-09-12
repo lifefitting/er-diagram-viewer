@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import { useApp } from '../../store';
 import { ExportMenu } from './ExportMenu';
 import { MODULE_PALETTES, type PaletteName, type ModuleColor } from '../../infer/inferModules';
+import { PALETTE_OPTIONS } from '../../infer/paletteCatalog';
 import type { SearchScope, ThemePreference } from '../../store/types';
 import {
   BrandMark,
@@ -18,16 +19,6 @@ import {
 interface Props {
   onOpenImport: () => void;
 }
-
-// Labels are deliberately understated two-character tone words (品牌语气：克制) —
-// they describe the color temperament, not sell it.
-const PALETTE_OPTIONS: Array<{ id: PaletteName; label: string; description: string }> = [
-  { id: 'professional', label: '沉稳', description: '低饱和，评审默认' },
-  { id: 'vibrant', label: '明快', description: '高饱和，适合演示' },
-  { id: 'pastel', label: '柔和', description: '浅色调，适合久读' },
-  { id: 'earth', label: '大地', description: '暖褐色调' },
-  { id: 'mono', label: '单色', description: '蓝灰阶，适合打印' },
-];
 
 const THEME_OPTIONS: Array<{ id: ThemePreference; label: string; icon: () => JSX.Element }> = [
   { id: 'light', label: '亮色', icon: SunIcon },
@@ -382,12 +373,14 @@ function PaletteDropdown({ current }: { current: PaletteName }) {
       {open && (
         <div
           className={clsx(
-            'absolute left-0 top-full mt-1 min-w-[220px]',
+            'absolute right-0 top-full mt-1 w-[304px] max-w-[calc(100vw-24px)]',
+            'max-h-[calc(100dvh-64px)] overflow-y-auto',
             'bg-white dark:bg-inkd-100',
             'border border-ink-100 dark:border-inkd-300',
             'rounded-md shadow-xl z-40 py-1',
           )}
           role="listbox"
+          aria-label="模块色系"
         >
           {PALETTE_OPTIONS.map((opt) => {
             const active = opt.id === current;
@@ -407,7 +400,7 @@ function PaletteDropdown({ current }: { current: PaletteName }) {
                   setOpen(false);
                 }}
               >
-                <ColorStrip colors={MODULE_PALETTES[opt.id].slice(0, 5)} />
+                <ColorStrip colors={MODULE_PALETTES[opt.id].slice(0, 6)} />
                 <span className="flex-1">
                   <span className="text-ink-800 dark:text-inkd-800 font-medium">{opt.label}</span>
                   <span className="text-ink-400 dark:text-inkd-500 ml-1">{opt.description}</span>
@@ -424,7 +417,10 @@ function PaletteDropdown({ current }: { current: PaletteName }) {
 
 function ColorStrip({ colors }: { colors: ModuleColor[] }) {
   return (
-    <span className="flex shrink-0 rounded overflow-hidden border border-ink-100/70 dark:border-inkd-300/70">
+    <span
+      aria-hidden="true"
+      className="flex shrink-0 rounded overflow-hidden border border-ink-100/70 dark:border-inkd-300/70"
+    >
       {colors.map((c, i) => (
         <span key={i} className="w-2.5 h-3 inline-block" style={{ background: c.header }} />
       ))}
