@@ -31,6 +31,7 @@ import type { NodePos, OverlayState, Selection } from './types';
 import { TableOverlay } from './overlay/TableOverlay';
 import { applyOverlayGeometry } from './overlay/overlayGeometry';
 import { InteractionFpsHud, type InteractionFpsHudHandle } from './overlay/InteractionFpsHud';
+import { createViewportFpsTracker } from './overlay/viewportFps';
 import { RouteHandles } from './overlay/RouteHandles';
 import { runLayout } from './layout/runLayout';
 import { placeIncrementalNodes } from './layout/incrementalLayout';
@@ -819,6 +820,15 @@ export function DiagramCanvas() {
       if (publishModels) setPositions(pos);
     };
     syncOverlaysRef.current = syncPositions;
+    const readViewport = () => ({ ...cy.pan(), zoom: cy.zoom() });
+    const viewportFps = createViewportFpsTracker(
+      readViewport(),
+      () => fpsHudRef.current?.start('pan'),
+      () => fpsHudRef.current?.stop('pan'),
+    );
+    // Search navigation, module locate, fit, zoom controls and pointer input all
+    // reach these camera events. Sampling stays at the actual geometry flush.
+    cy.on('pan zoom', () => viewportFps.update(readViewport(), !nodeDraggingRef.current));
     let geometryRafId: number | undefined;
     const scheduleGeometry = () => {
       if (geometryRafId !== undefined) return;
@@ -988,22 +998,6 @@ export function DiagramCanvas() {
     // everywhere in the canvas area. The zoom focal point still uses the cy
     // container's rect (that's the viewport cytoscape's renderedPosition is in).
     const wheelTarget = container.parentElement ?? container;
-    let wheelFpsActive = false;
-    let wheelFpsStopTimer: number | undefined;
-    const noteWheelMovement = () => {
-      if (!wheelFpsActive) {
-        wheelFpsActive = true;
-        fpsHudRef.current?.start('pan');
-      }
-      if (wheelFpsStopTimer !== undefined) window.clearTimeout(wheelFpsStopTimer);
-      wheelFpsStopTimer = window.setTimeout(() => {
-        wheelFpsStopTimer = undefined;
-        wheelFpsActive = false;
-        // A table drag may have started while the wheel timer was pending.
-        // Scope the stop so this old session cannot hide the newer HUD.
-        fpsHudRef.current?.stop('pan');
-      }, 180);
-    };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (e.ctrlKey) {
@@ -1015,13 +1009,11 @@ export function DiagramCanvas() {
         const factor = Math.min(1.2, Math.max(0.8, Math.exp(-e.deltaY * 0.01)));
         const next = Math.min(cy.maxZoom(), Math.max(cy.minZoom(), cy.zoom() * factor));
         if (Math.abs(next - cy.zoom()) < 0.000_001) return;
-        noteWheelMovement();
         cy.zoom({ level: next, renderedPosition: rendered });
       } else {
         const cur = cy.pan();
         const next = clampPan(cy, { x: cur.x - e.deltaX, y: cur.y - e.deltaY });
         if (next.x === cur.x && next.y === cur.y) return;
-        noteWheelMovement();
         cy.pan(next);
       }
     };
@@ -1041,7 +1033,7 @@ export function DiagramCanvas() {
       resolutionQuery.removeEventListener('change', onResolutionChange);
       syncOverlaysRef.current = null;
       wheelTarget.removeEventListener('wheel', onWheel);
-      if (wheelFpsStopTimer !== undefined) clearTimeout(wheelFpsStopTimer);
+      viewportFps.dispose();
       if (saveTimer !== undefined) clearTimeout(saveTimer);
       // Cancel a pending hide-handles timer too, so its setHoveredEdgeId(null)
       // can't fire after the component is gone (and leak the timer).
@@ -1534,7 +1526,7 @@ export function DiagramCanvas() {
         }
         return;
       }
-      fpsHudRef.current?.stop();
+      fpsHudRef.current?.stop('table');
       // Moving a node tears its connector ports away from any hand-edited bends,
       // so drop the overrides for every edge touching a moved card — those edges
       // re-auto-route. (Only here + onTableResize; never on the cy 'position'
@@ -1670,16 +1662,8 @@ export function DiagramCanvas() {
       // capturing it directly would make `startPan.x` mutate as we pan and the
       // delta accumulate (the drag would fly off-screen). Spread to snapshot it.
       const startPan = { ...cy.pan() };
-      let fpsStarted = false;
       setPanning(true);
       const onMove = (mv: MouseEvent) => {
-        if (
-          !fpsStarted &&
-          Math.abs(mv.clientX - startClient.x) + Math.abs(mv.clientY - startClient.y) > 3
-        ) {
-          fpsStarted = true;
-          fpsHudRef.current?.start('pan');
-        }
         cy.pan(
           clampPan(cy, {
             x: startPan.x + (mv.clientX - startClient.x),
@@ -1688,7 +1672,6 @@ export function DiagramCanvas() {
         );
       };
       const onUp = () => {
-        if (fpsStarted) fpsHudRef.current?.stop();
         setPanning(false);
       };
       beginDrag(onMove, onUp);
