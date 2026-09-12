@@ -4,6 +4,7 @@ name: deploy-pages
 # 站点布局：
 #   /         → landing/index.html （产品宣传页）
 #   /app/     → 已构建的 SPA       （真正的工具）
+#   /assets/ → 宣传页使用的 SVG 示例图
 #
 # 触发条件：
 #   - main 分支 push（每次合并主线都重新发布）
@@ -45,16 +46,9 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
-      - name: Build SPA
-        run: bun run build
-
-      # 把 landing/ 放在 site/ 根，把 dist/ 放在 site/app/。
-      - name: Assemble site/
-        run: |
-          mkdir -p site
-          cp -R landing/. site/
-          mkdir -p site/app
-          cp -R dist/. site/app/
+      # 与本地预览共用组装逻辑，包含 SVG 资源及其发布路径重写。
+      - name: Build and assemble site/
+        run: bun run build:site
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -33,8 +33,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:site": "bun run build && bun scripts/assemble-site.mjs",
     "build:single": "tsc -b && vite build --mode singlefile && mv dist-single/index.html dist-single/er-diagram-viewer.html",
     "preview": "vite preview",
+    "preview:site": "vite preview --outDir site",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

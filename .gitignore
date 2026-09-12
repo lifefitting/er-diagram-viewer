@@ -6,6 +6,7 @@ graphify-out/
 # Build artifacts
 dist/
 dist-single/
+/site/
 *.tsbuildinfo
 
 # Editor / OS
