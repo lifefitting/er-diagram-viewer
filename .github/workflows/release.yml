@@ -1,6 +1,6 @@
 name: release
 
-# 当推送形如 `v0.1.0` / `v1.2.3` 的 tag 时触发：
+# 当推送形如 `v0.1.0` / `V0.3.6` 的 tag 时触发（兼容大小写 V）：
 #   1. 跑 `bun run build:single` 产出 `dist-single/er-diagram-viewer.html`
 #   2. 用 softprops/action-gh-release 自动创建 GitHub Release
 #      - tag 名作为 release 名
@@ -8,13 +8,15 @@ name: release
 #      - 把单文件 HTML 作为 Asset 上传
 #
 # 这样以后发版只需要：
-#   git tag v0.1.1 && git push --tags
+#   git tag -a V0.3.6 -m "Release V0.3.6"
+#   git push origin refs/tags/V0.3.6
 # 不必再手动去 GitHub UI 拖文件。
 
 on:
   push:
     tags:
       - 'v*.*.*'
+      - 'V*.*.*'
 
 permissions:
   contents: write  # 创建 release + 上传 asset 都需要
