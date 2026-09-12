@@ -43,6 +43,7 @@ PERF_TARGETS='before=http://127.0.0.1:4173,after=http://127.0.0.1:4174' \
 - `PERF_MOVE_STEPS` / `PERF_STEP_DELAY_MS`：手势采样步数与步间隔。
 - `PERF_RUN_ID` / `PERF_OUTPUT_DIR`：结果目录名称与根目录。
 - `PERF_CHROME`：可选的 Chromium/Chrome 可执行文件；默认使用 Playwright Chromium。
+- `PERF_DEVICE_SCALE_FACTOR`：设备像素比，默认 `1`（普通屏幕）；可设 `1.25`（125% 缩放）或 `2`（Retina）。结果的 environment 中记录该值。
 
 ## 采样约束
 

@@ -832,6 +832,16 @@ export function DiagramCanvas() {
     // Camera changes only mutate registered root styles. No table/column React
     // subtree is reconciled while the user pans, zooms, drags or resizes.
     cy.on('pan zoom resize', scheduleGeometry);
+    // Moving a window between monitors (or changing browser zoom) can change
+    // DPR without a camera event. Re-snap the display origin to the new screen.
+    let resolutionQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    const onResolutionChange = () => {
+      resolutionQuery.removeEventListener('change', onResolutionChange);
+      resolutionQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      resolutionQuery.addEventListener('change', onResolutionChange);
+      scheduleGeometry();
+    };
+    resolutionQuery.addEventListener('change', onResolutionChange);
     cy.on('layoutstop', () => {
       scheduleGeometry();
       setPositionRevision((revision) => revision + 1);
@@ -1027,6 +1037,7 @@ export function DiagramCanvas() {
       // Cancel a pending drag-flush rAF so it can't fire against the destroyed cy.
       if (posRafId !== undefined) cancelAnimationFrame(posRafId);
       if (geometryRafId !== undefined) cancelAnimationFrame(geometryRafId);
+      resolutionQuery.removeEventListener('change', onResolutionChange);
       syncOverlaysRef.current = null;
       wheelTarget.removeEventListener('wheel', onWheel);
       if (wheelFpsStopTimer !== undefined) clearTimeout(wheelFpsStopTimer);

@@ -5,6 +5,10 @@ import { resolve } from 'node:path';
 import { PERF_SCENARIOS, generateSql } from './fixtures.mjs';
 
 const VIEWPORT = Object.freeze({ width: 1440, height: 1000 });
+const DEVICE_SCALE_FACTOR = Number(process.env.PERF_DEVICE_SCALE_FACTOR ?? 1);
+if (!Number.isFinite(DEVICE_SCALE_FACTOR) || DEVICE_SCALE_FACTOR <= 0) {
+  throw new Error('PERF_DEVICE_SCALE_FACTOR must be a positive number');
+}
 const ITERATIONS = positiveInteger('PERF_ITERATIONS', 7);
 const WARMUPS = nonNegativeInteger('PERF_WARMUPS', 1);
 const MOVE_STEPS = positiveInteger('PERF_MOVE_STEPS', 72);
@@ -504,6 +508,7 @@ const report = {
   environment: {
     browser: await browser.version(),
     viewport: VIEWPORT,
+    deviceScaleFactor: DEVICE_SCALE_FACTOR,
     moveSteps: MOVE_STEPS,
     stepDelayMs: STEP_DELAY_MS,
     settleMs: SETTLE_MS,
@@ -543,7 +548,7 @@ try {
         const roundLabel = warmup ? `warmup-${iteration}` : `sample-${iteration}`;
         const context = await browser.newContext({
           viewport: VIEWPORT,
-          deviceScaleFactor: 1,
+          deviceScaleFactor: DEVICE_SCALE_FACTOR,
           reducedMotion: 'no-preference',
         });
         try {
