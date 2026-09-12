@@ -1,5 +1,6 @@
 import type { AppState, WorkspaceGroup } from './types';
 import { PALETTE_IDS } from '../infer/paletteCatalog';
+import { validModuleColor, validModuleLabel } from '../infer/moduleCustomization';
 
 /**
  * Persisted-state migration + shape validation for the `persist` middleware.
@@ -139,6 +140,27 @@ export function sanitizePersisted(raw: unknown): Persisted {
     )
   )
     out.moduleOverrides = raw.moduleOverrides;
+  if (
+    isRecord(raw.customModules) &&
+    Object.entries(raw.customModules).every(
+      ([key, value]) =>
+        key.length > 0 &&
+        isRecord(value) &&
+        validModuleLabel(value.label) &&
+        PALETTE_IDS.has(value.palette as string) &&
+        Number.isSafeInteger(value.colorIndex) &&
+        (value.colorIndex as number) >= 0 &&
+        (value.colorIndex as number) <= 100000,
+    )
+  )
+    out.customModules = raw.customModules;
+  if (
+    isRecord(raw.moduleColors) &&
+    Object.entries(raw.moduleColors).every(
+      ([key, color]) => key.length > 0 && validModuleColor(color),
+    )
+  )
+    out.moduleColors = raw.moduleColors;
   if (isRecord(raw.fieldNotes)) {
     // Two generations of legacy shapes upgrade in place: plain-string values
     // (pre-timestamp) and {text, updatedAt} objects (pre-severity/status) —

@@ -1,7 +1,7 @@
 import type { Core } from 'cytoscape';
 import type { Schema, Table } from '../parser/types';
 import type { ModulesResult } from '../infer/inferModules';
-import { colorForTableModule } from '../infer/inferModules';
+import { colorForTableModule, moduleDisplayLabel } from '../infer/inferModules';
 import type { DisplayOptions } from '../store';
 import {
   columnRoleBadge,
@@ -164,7 +164,7 @@ export function buildDiagramSvg(cy: Core, opts: SvgRenderOpts): string {
       y: pos.y - h / 2,
       w,
       h,
-      moduleKey,
+      moduleKey: moduleDisplayLabel(moduleKey, modules.modules),
       header: color.header,
       border: color.border,
       text: color.text,

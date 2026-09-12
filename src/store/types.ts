@@ -1,6 +1,7 @@
 import type { ForeignKey, Schema } from '../parser/types';
 import type { InferredFK } from '../infer/inferForeignKeys';
 import type { ModulesResult, PaletteName } from '../infer/inferModules';
+import type { ModuleCustomization } from '../infer/moduleCustomization';
 
 /** User-selectable theme preference. `system` follows the OS via
  *  `prefers-color-scheme`. Resolved to a concrete light/dark value by the
@@ -25,7 +26,7 @@ export interface DisplayOptions {
   showManualLinks: boolean;
 }
 
-export interface SchemaState {
+export interface SchemaState extends ModuleCustomization {
   rawSql: string;
   schema: Schema | null;
   inferred: InferredFK[];
@@ -36,7 +37,7 @@ export interface SchemaState {
    *  re-derives the same candidates); cleared on a new import (`setSql`). */
   logicalKeys: string[];
   /** Explicit table → module assignments made from the canvas multi-select
-   *  toolbar. Keys are stable cy node ids; values are inferred module keys.
+   *  toolbar. Keys are stable cy node ids; values are inferred or custom module keys.
    *  The automatic inference remains the baseline and these persisted choices
    *  are applied last, so a user decision always wins without rewriting DDL. */
   moduleOverrides: Record<string, string>;
@@ -63,6 +64,10 @@ export interface SchemaState {
   /** Move all selected tables into an existing module. Passing null removes
    *  their explicit assignments and restores automatic grouping. */
   assignTablesToModule: (nodeIds: string[], moduleKey: string | null) => void;
+  /** Create or reuse a named module and assign the selected tables atomically. */
+  createModuleForTables: (nodeIds: string[], label: string) => string;
+  /** null restores the palette-derived color. */
+  setModuleColor: (moduleKey: string, color: string | null) => void;
   /** Replace the whole workspace with a validated `.erreview` archive payload
    *  (see exports/archive.ts). Caller must pre-flight `parseSql` on the
    *  payload's rawSql — this action assumes it parses. */

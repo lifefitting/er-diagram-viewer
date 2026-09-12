@@ -1,10 +1,13 @@
 import { useApp } from '../../store';
+import { useState } from 'react';
+import { ModuleColorEditor } from './ModuleColorEditor';
 
 /** Module legend list. Section header lives in the parent AccordionSection. */
 export function ModulesPanel() {
   const modules = useApp((s) => s.modules);
   const overrideCount = useApp((s) => Object.keys(s.moduleOverrides).length);
   const flashModule = useApp((s) => s.flashModule);
+  const [editingColor, setEditingColor] = useState<string | null>(null);
 
   if (modules.ordered.length === 0) {
     return null;
@@ -14,40 +17,59 @@ export function ModulesPanel() {
     <div className="px-2 py-1.5">
       <div className="space-y-0.5">
         {modules.ordered.map((m) => (
-          <button
-            key={m.name}
-            className={
-              'group/row w-full flex items-center gap-2 px-1.5 py-1 rounded ' +
-              'text-left hover:bg-ink-50 dark:hover:bg-inkd-200 transition-colors'
-            }
-            onClick={() => flashModule(m.name)}
-            title="点击在画布上定位到该模块的所有表"
-          >
-            <span
-              className="w-3 h-3 rounded-sm shrink-0"
-              style={{ background: m.color.header, border: `1px solid ${m.color.border}` }}
-            />
-            <span className="text-[12px] font-medium text-ink-800 dark:text-inkd-800 truncate flex-1">
-              {m.label}
-            </span>
-            {/* Hover affordance: a tiny "→ 定位" hint that fades in only
+          <div key={m.name} data-module-row={m.name}>
+            <div
+              className={
+                'group/row w-full flex items-center gap-2 px-1.5 py-1 rounded ' +
+                'text-left hover:bg-ink-50 dark:hover:bg-inkd-200 transition-colors'
+              }
+            >
+              <button
+                type="button"
+                aria-label={`修改「${m.label}」的颜色`}
+                title="点击修改模块颜色"
+                aria-expanded={editingColor === m.name}
+                className="h-5 w-5 shrink-0 rounded p-1 hover:ring-1 hover:ring-blue-400"
+                onClick={() => setEditingColor((key) => (key === m.name ? null : m.name))}
+              >
+                <span
+                  className="block h-3 w-3 rounded-sm"
+                  style={{ background: m.color.header, border: `1px solid ${m.color.border}` }}
+                />
+              </button>
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                aria-label={`定位模块 ${m.label}`}
+                title="点击在画布上定位到该模块的所有表"
+                onClick={() => flashModule(m.name)}
+              >
+                <span className="text-[12px] font-medium text-ink-800 dark:text-inkd-800 truncate flex-1">
+                  {m.label}
+                </span>
+                {/* Hover affordance: a tiny "→ 定位" hint that fades in only
                 when the row is hovered. Replaces the static bottom-of-panel
                 instructions, putting the affordance right where the user
                 aims their cursor. */}
-            <span
-              className={
-                'flex items-center gap-0.5 text-[9.5px] text-ink-400 dark:text-inkd-500 ' +
-                'opacity-0 group-hover/row:opacity-100 transition-opacity'
-              }
-              aria-hidden
-            >
-              <LocateIcon />
-              <span>定位</span>
-            </span>
-            <span className="text-[10px] text-ink-400 dark:text-inkd-500 tabular-nums shrink-0 w-4 text-right">
-              {m.tables.length}
-            </span>
-          </button>
+                <span
+                  className={
+                    'flex items-center gap-0.5 text-[9.5px] text-ink-400 dark:text-inkd-500 ' +
+                    'opacity-0 group-hover/row:opacity-100 transition-opacity'
+                  }
+                  aria-hidden
+                >
+                  <LocateIcon />
+                  <span>定位</span>
+                </span>
+                <span className="text-[10px] text-ink-400 dark:text-inkd-500 tabular-nums shrink-0 w-4 text-right">
+                  {m.tables.length}
+                </span>
+              </button>
+            </div>
+            {editingColor === m.name && (
+              <ModuleColorEditor module={m} onClose={() => setEditingColor(null)} />
+            )}
+          </div>
         ))}
       </div>
       {/* Replaced the always-visible 3-line bottom hint with a single info
@@ -62,9 +84,9 @@ export function ModulesPanel() {
           }
           title={
             '· 模块按表名前缀 + FK 邻接关系自动归类\n' +
-            '· Shift/⌘ 多选表后，可在画布底部批量修改所属模块或恢复自动分组\n' +
-            '· 点击任意模块色块可在画布上平滑定位到该模块的所有表\n' +
-            '· 顶部色板按钮可切换整套配色'
+            '· Shift/⌘ 多选表后，可在画布底部新建自定义模块、批量移动或恢复自动分组\n' +
+            '· 点击色块修改颜色；点击模块名称定位到该模块的所有表\n' +
+            '· 顶部色板按钮切换整套配色；自选颜色保留，需单独恢复默认'
           }
         >
           <InfoIcon />

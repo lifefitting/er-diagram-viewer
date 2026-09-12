@@ -6,7 +6,10 @@ import { fieldNoteKey, parseFieldNoteKey } from './notesSlice';
 import type { AppState, SchemaState } from './types';
 import { reconcileColumnOrders } from './columnOrder';
 
-type DerivationSettings = Pick<SchemaState, 'logicalKeys' | 'moduleOverrides' | 'workspaceGroups'>;
+type DerivationSettings = Pick<
+  SchemaState,
+  'logicalKeys' | 'moduleOverrides' | 'workspaceGroups' | 'customModules' | 'moduleColors'
+>;
 
 type PreservedWorkspaceState = Pick<
   AppState,
@@ -14,6 +17,8 @@ type PreservedWorkspaceState = Pick<
   | 'manualFks'
   | 'logicalKeys'
   | 'moduleOverrides'
+  | 'customModules'
+  | 'moduleColors'
   | 'workspaceGroups'
   | 'fieldNotes'
   | 'collapsed'
@@ -65,10 +70,7 @@ export function hasTableOverlap(current: Schema | null, next: Schema): boolean {
  * (so a lone `orders_2024` card lands on `orders_*` after the merge
  * threshold). Each next table is claimed at most once.
  */
-export function buildTableRemap(
-  current: Schema | null,
-  next: Schema,
-): Map<string, string> {
+export function buildTableRemap(current: Schema | null, next: Schema): Map<string, string> {
   const remap = new Map<string, string>();
   if (!current) return remap;
 
@@ -125,6 +127,8 @@ export function reconcileDerivationSettings(
   return {
     logicalKeys: state.logicalKeys.filter((key) => liveColumns.has(key.toLowerCase())),
     moduleOverrides: rekeyNodeIdRecord(state.moduleOverrides, remap),
+    customModules: state.customModules,
+    moduleColors: state.moduleColors,
     workspaceGroups: state.workspaceGroups
       .map((group) => ({
         ...group,

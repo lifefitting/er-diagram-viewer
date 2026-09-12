@@ -14,6 +14,12 @@ import {
   reconcileWorkspaceState,
 } from './reconcileSqlUpdate';
 import { applyColumnOrders, reconcileColumnOrders } from './columnOrder';
+import {
+  normalizeModuleLabel,
+  validModuleLabel,
+  validModuleColor,
+} from '../infer/moduleCustomization';
+import { nodeId } from '../diagram/nodeId';
 
 /** Schema, inferred FKs, modules. Owns the parse pipeline entry points. */
 export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (set, get) => ({
@@ -24,6 +30,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
   palette: DEFAULT_PALETTE,
   logicalKeys: [],
   moduleOverrides: {},
+  customModules: {},
+  moduleColors: {},
   workspaceGroups: [],
   workspaceEpoch: 0,
   setSql(sql) {
@@ -45,6 +53,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       manualFks: [],
       logicalKeys: [],
       moduleOverrides: {},
+      customModules: {},
+      moduleColors: {},
       workspaceGroups: [],
       fieldNotes: {},
       collapsed: {},
@@ -81,6 +91,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       settings.logicalKeys,
       settings.workspaceGroups,
       settings.moduleOverrides,
+      settings,
     );
     const preserved = reconcileWorkspaceState(current, next.schema, next.inferred, settings);
     set({
@@ -100,6 +111,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       get().logicalKeys,
       get().workspaceGroups,
       get().moduleOverrides,
+      get(),
     );
     const columnOrders = reconcileColumnOrders(get().columnOrders, schema);
     set({ schema: applyColumnOrders(schema, columnOrders), inferred, modules, columnOrders });
@@ -110,10 +122,20 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
     // existing global palette control remains predictable.
     set((s) => {
       const workspaceGroups = s.workspaceGroups.map((group) => ({ ...group, palette: p }));
+      const customModules = Object.fromEntries(
+        Object.entries(s.customModules).map(([key, definition]) => [
+          key,
+          { ...definition, palette: p },
+        ]),
+      );
       return {
         palette: p,
         workspaceGroups,
-        modules: recomputeModules(s.schema, s.inferred, p, workspaceGroups, s.moduleOverrides),
+        customModules,
+        modules: recomputeModules(s.schema, s.inferred, p, workspaceGroups, s.moduleOverrides, {
+          customModules,
+          moduleColors: s.moduleColors,
+        }),
       };
     });
   },
@@ -129,6 +151,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       keys,
       get().workspaceGroups,
       get().moduleOverrides,
+      get(),
     );
     const columnOrders = reconcileColumnOrders(get().columnOrders, schema);
     set({
@@ -141,8 +164,16 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
   },
   assignTablesToModule(nodeIds, moduleKey) {
     set((s) => {
+      if (
+        moduleKey !== null &&
+        !s.modules.modules.has(moduleKey) &&
+        !Object.hasOwn(s.customModules, moduleKey)
+      )
+        return s;
+      const liveIds = new Set(s.schema?.tables.map((table) => nodeId(table.name)));
       const moduleOverrides = { ...s.moduleOverrides };
       for (const id of nodeIds) {
+        if (!liveIds.has(id)) continue;
         if (moduleKey === null) delete moduleOverrides[id];
         else moduleOverrides[id] = moduleKey;
       }
@@ -154,6 +185,80 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
           s.palette,
           s.workspaceGroups,
           moduleOverrides,
+          s,
+        ),
+      };
+    });
+  },
+  createModuleForTables(nodeIds, input) {
+    const label = normalizeModuleLabel(input);
+    if (!validModuleLabel(label))
+      throw new Error('模块名称需为 1–64 个字符，且不能包含换行或控制字符');
+    const s = get();
+    const liveIds = new Set(s.schema?.tables.map((table) => nodeId(table.name)));
+    const ids = nodeIds.filter((id) => liveIds.has(id));
+    if (ids.length === 0) throw new Error('请先选择要归入模块的表');
+    const comparable = label.toLowerCase();
+    const matches = new Set([
+      ...s.modules.ordered.filter((m) => m.label.toLowerCase() === comparable).map((m) => m.name),
+      ...Object.entries(s.customModules)
+        .filter(([, m]) => m.label.toLowerCase() === comparable)
+        .map(([key]) => key),
+    ]);
+    if (matches.size > 1) throw new Error('存在多个同名模块，请从下拉列表选择目标，或输入不同名称');
+    const existing = [...matches][0];
+    // getRandomValues also works on non-HTTPS intranet deployments, where
+    // randomUUID is unavailable. The id is storage identity, never UI text.
+    const key =
+      existing ??
+      `custom:${Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+        byte.toString(16).padStart(2, '0'),
+      ).join('')}`;
+    const customModules = existing
+      ? s.customModules
+      : {
+          ...s.customModules,
+          [key]: {
+            label,
+            palette: s.palette,
+            colorIndex: s.modules.ordered.length + Object.keys(s.customModules).length,
+          },
+        };
+    const moduleOverrides = {
+      ...s.moduleOverrides,
+      ...Object.fromEntries(ids.map((id) => [id, key])),
+    };
+    set({
+      customModules,
+      moduleOverrides,
+      modules: recomputeModules(
+        s.schema,
+        s.inferred,
+        s.palette,
+        s.workspaceGroups,
+        moduleOverrides,
+        { customModules, moduleColors: s.moduleColors },
+      ),
+    });
+    return key;
+  },
+  setModuleColor(moduleKey, color) {
+    if (color !== null && !validModuleColor(color))
+      throw new Error('请输入六位 HEX 色值，例如 #087f8c');
+    set((s) => {
+      if (!s.modules.modules.has(moduleKey)) return s;
+      const moduleColors = { ...s.moduleColors };
+      if (color === null) delete moduleColors[moduleKey];
+      else moduleColors[moduleKey] = color.toLowerCase();
+      return {
+        moduleColors,
+        modules: recomputeModules(
+          s.schema,
+          s.inferred,
+          s.palette,
+          s.workspaceGroups,
+          s.moduleOverrides,
+          { customModules: s.customModules, moduleColors },
         ),
       };
     });
@@ -169,6 +274,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
     const palette = rest.palette ?? get().palette;
     const logicalKeys = rest.logicalKeys ?? [];
     const moduleOverrides = rest.moduleOverrides ?? {};
+    const customModules = rest.customModules ?? {};
+    const moduleColors = rest.moduleColors ?? {};
     const workspaceGroups = rest.workspaceGroups ?? [];
     const { schema, inferred, modules } = runPipeline(
       rest.rawSql,
@@ -176,6 +283,7 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       logicalKeys,
       workspaceGroups,
       moduleOverrides,
+      { customModules, moduleColors },
     );
     if (schema.tables.length === 0) {
       throw new Error('存档中未解析出任何表');
@@ -198,6 +306,8 @@ export const createSchemaSlice: StateCreator<AppState, [], [], SchemaState> = (s
       palette,
       logicalKeys,
       moduleOverrides,
+      customModules,
+      moduleColors,
       workspaceGroups,
       columnOrders,
       schema: applyColumnOrders(schema, columnOrders),

@@ -5,8 +5,42 @@ import { inferModules } from '../infer/inferModules';
 import { PALETTE_OPTIONS } from '../infer/paletteCatalog';
 import { buildElements } from '../diagram/buildGraph';
 import { buildDiagramSvg } from './toSvg';
+import { runPipeline } from '../store/pipeline';
+import { useApp } from '../store';
 
 describe('palette colors in the shared SVG/PNG renderer', () => {
+  it('renders escaped custom module labels and colors without exposing internal ids', () => {
+    const key = 'custom:svg-test';
+    const { schema, modules } = runPipeline(
+      'CREATE TABLE users(id INT PRIMARY KEY);',
+      'professional',
+      [],
+      [],
+      { 't:users': key },
+      {
+        customModules: { [key]: { label: '业务 <A&B>', palette: 'professional', colorIndex: 1 } },
+        moduleColors: { [key]: '#880044' },
+      },
+    );
+    const display = useApp.getState().display;
+    const { elements } = buildElements(schema, [], {
+      modules,
+      display,
+      collapsed: {},
+      tableWidths: {},
+      decisions: {},
+    });
+    const cy = cytoscape({ headless: true, elements, layout: { name: 'preset' } });
+    try {
+      const svg = buildDiagramSvg(cy, { schema, modules, display, fkSourceColumns: new Map() });
+      expect(svg).toContain('业务 &lt;A&amp;B&gt;');
+      expect(svg).toContain('fill="#880044"');
+      expect(svg).not.toContain(key);
+      expect(svg).not.toContain('<A&B>');
+    } finally {
+      cy.destroy();
+    }
+  });
   it.each(PALETTE_OPTIONS)(
     'renders $id headers and independent light/dark connectors',
     ({ id }) => {

@@ -1,6 +1,6 @@
 import type { ElementDefinition } from 'cytoscape';
 import type { Column, ForeignKey, Schema, Table } from '../parser/types';
-import { colorForTableModule, type ModulesResult } from '../infer/inferModules';
+import { colorForTableModule, moduleDisplayLabel, type ModulesResult } from '../infer/inferModules';
 import { fkKey } from '../infer/inferForeignKeys';
 import { darkEdgeColor } from './edgeColor';
 import { nodeId } from './nodeId';
@@ -298,11 +298,12 @@ export function buildElements(
   for (const table of schema.tables) {
     const isCollapsed = !!collapsed[table.name];
     const moduleKey = modules.byTable.get(table.name) ?? '';
+    const moduleLabel = moduleDisplayLabel(moduleKey, modules.modules);
     const { width, height } = tableBoxSize(
       table,
       isCollapsed,
       display,
-      moduleKey,
+      moduleLabel,
       tableWidths[table.name],
     );
     widthByTable.set(table.name, width);
@@ -314,6 +315,7 @@ export function buildElements(
         type: 'table',
         rawName: table.name,
         moduleKey,
+        moduleLabel,
         moduleColor: color.header,
         boxWidth: width,
         boxHeight: height,

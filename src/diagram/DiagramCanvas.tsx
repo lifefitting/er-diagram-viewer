@@ -14,7 +14,8 @@ import { manualFkFromDraft, validateManualFk, type ManualFkDraft } from '../stor
 import { fieldNoteKey, formatNoteTime, NOTE_SEVERITIES, NOTE_STATUSES } from '../store/notesSlice';
 import type { FieldNote, NoteSeverity, NoteStatus } from '../store/types';
 import type { Table } from '../parser/types';
-import { colorForTableModule, type ModulesResult } from '../infer/inferModules';
+import { colorForTableModule, moduleDisplayLabel, type ModulesResult } from '../infer/inferModules';
+import { SelectionModuleControl } from './selection/SelectionModuleControl';
 import {
   bindView,
   unbindView,
@@ -802,7 +803,7 @@ export function DiagramCanvas() {
           w: bb.w,
           h: bb.h,
           moduleColor,
-          moduleKey,
+          moduleKey: moduleDisplayLabel(moduleKey, mods.modules),
         };
         pos.push(next);
         liveIds.add(next.id);
@@ -1063,7 +1064,7 @@ export function DiagramCanvas() {
   useEffect(() => {
     const fromControl = (t: EventTarget | null) =>
       t instanceof HTMLElement &&
-      !!t.closest('input, textarea, button, a, [contenteditable="true"]');
+      !!t.closest('input, textarea, select, button, a, [contenteditable="true"]');
     const onKeyDown = (e: KeyboardEvent) => {
       if (fromControl(e.target)) return;
       const meta = e.metaKey || e.ctrlKey;
@@ -1314,7 +1315,8 @@ export function DiagramCanvas() {
         const t = tableByIdRef.current.get(n.id());
         if (!t) return;
         const isCollapsed = !!collapsed[t.name];
-        const moduleKey = (n.data('moduleKey') as string) ?? '';
+        const moduleKey =
+          (n.data('moduleLabel') as string) ?? (n.data('moduleKey') as string) ?? '';
         const { width, height } = tableBoxSize(
           t,
           isCollapsed,
@@ -2341,38 +2343,12 @@ export function DiagramCanvas() {
             }
             onSelect={arrangeSelectedTables}
           />
-          <label className="pointer-events-auto inline-flex items-center gap-1">
-            <span className="sr-only">批量修改所属模块</span>
-            <select
-              aria-label="批量修改所属模块"
-              className="max-w-[190px] rounded-full border border-ink-200 bg-white px-2 py-0.5 text-[11px] text-ink-700 outline-none transition-colors hover:border-ink-300 focus:border-blue-400 dark:border-inkd-300 dark:bg-inkd-100 dark:text-inkd-700"
-              value={selectedModuleKey}
-              onChange={(event) => {
-                const targetKey = event.target.value;
-                const restoreAuto = targetKey === '__auto__';
-                useApp
-                  .getState()
-                  .assignTablesToModule([...selectedIds], restoreAuto ? null : targetKey);
-                const target = modules.modules.get(targetKey);
-                showConnectNotice(
-                  restoreAuto
-                    ? `已恢复 ${selectedIds.size} 张表的自动分组`
-                    : `已将 ${selectedIds.size} 张表移到「${target?.label ?? targetKey}」`,
-                  'ok',
-                );
-              }}
-            >
-              <option value="" disabled>
-                多个模块 · 批量调整…
-              </option>
-              {modules.ordered.map((module) => (
-                <option key={module.name} value={module.name}>
-                  移到 {module.label}
-                </option>
-              ))}
-              <option value="__auto__">恢复自动分组</option>
-            </select>
-          </label>
+          <SelectionModuleControl
+            selectedIds={selectedIds}
+            current={selectedModuleKey}
+            modules={modules}
+            onNotice={(message) => showConnectNotice(message, 'ok')}
+          />
           <button
             type="button"
             className="pointer-events-auto inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"

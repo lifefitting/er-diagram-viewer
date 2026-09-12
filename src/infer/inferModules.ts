@@ -18,6 +18,7 @@ export interface ModuleInfo {
   /** Member table names (original casing as in schema). */
   tables: string[];
   color: ModuleColor;
+  custom?: boolean;
 }
 
 export interface ModulesResult {
@@ -433,4 +434,10 @@ export function colorForTableModule(
   const key = byTable.get(tableName);
   if (!key) return FALLBACK_COLOR;
   return modules.get(key)?.color ?? FALLBACK_COLOR;
+}
+
+/** Never expose a persisted custom UUID as the user-visible table label. */
+export function moduleDisplayLabel(key: string, modules: Map<string, ModuleInfo>): string {
+  const module = modules.get(key);
+  return module?.custom ? module.label : key;
 }
