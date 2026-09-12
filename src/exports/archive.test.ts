@@ -10,6 +10,7 @@ import {
   isEncryptedWorkspaceArchive,
 } from './archive';
 import { PERSIST_VERSION } from '../store/persistMigrate';
+import { PALETTE_OPTIONS } from '../infer/paletteCatalog';
 
 const SNAPSHOT = {
   rawSql: 'CREATE TABLE a (id INT PRIMARY KEY);',
@@ -108,6 +109,30 @@ const LEGACY_V03_ARCHIVE = `{
 }`;
 
 describe('workspace archive round-trip', () => {
+  it.each(PALETTE_OPTIONS)(
+    'preserves $id for the workspace and merged groups without altering review/layout data',
+    ({ id }) => {
+      const snapshot = {
+        ...SNAPSHOT,
+        palette: id,
+        workspaceGroups: [
+          {
+            id: 'group-1',
+            label: 'Imported workspace',
+            sourceFile: 'untouched.erreview',
+            nodeIds: ['t:a'],
+            logicalKeys: [],
+            palette: id,
+            viewport: SNAPSHOT.viewport,
+            translation: { x: 17, y: 29 },
+          },
+        ],
+      };
+      const parsed = parseWorkspaceArchive(buildWorkspaceArchive(snapshot, OPTS));
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(parsed.state).toEqual(snapshot);
+    },
+  );
   it('keeps the v0.3.x envelope and persisted workspace fields readable', () => {
     expect(ARCHIVE_VERSION).toBe(1);
     expect(PERSIST_VERSION).toBe(2);

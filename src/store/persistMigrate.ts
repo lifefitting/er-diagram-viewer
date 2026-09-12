@@ -1,4 +1,5 @@
 import type { AppState, WorkspaceGroup } from './types';
+import { PALETTE_IDS } from '../infer/paletteCatalog';
 
 /**
  * Persisted-state migration + shape validation for the `persist` middleware.
@@ -30,7 +31,7 @@ type Persisted = Partial<AppState>;
  *  the zustand store instance. */
 export const PERSIST_VERSION = 2;
 
-const PALETTES = new Set(['professional', 'vibrant', 'pastel', 'earth', 'mono']);
+const PALETTES = PALETTE_IDS;
 const THEMES = new Set(['light', 'dark', 'system']);
 
 function isFiniteNum(v: unknown): v is number {

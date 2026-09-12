@@ -2,6 +2,9 @@
 
 这套脚本把最初放在 `/tmp` 的 v0.3.3–v0.3.5 对比流程收进仓库，默认测量 `small`、`medium` 两档的导入、画布平移和表拖拽。
 
+显示配色的离线对比度与色觉差异检查：`bun perf/palette-audit.ts`。
+口径和本轮结果见 [配色可读性报告](../docs/palette-readability.md)。
+
 ## 运行
 
 先启动待测版本：
